@@ -1,0 +1,700 @@
+{
+  "CWE-125___CVE-2024-25116.c___1-64___13.c": {
+    "pcg": {
+      "nodes": [
+        {
+          "id": "v1",
+          "type": "vulnerability",
+          "description": "long long maxIterations = CF_MAX_ITERATIONS;",
+          "location": 13
+        },
+        {
+          "id": "p1",
+          "type": "predicate",
+          "description": "argc < 3 || (argc % 2) == 0",
+          "location": 4
+        },
+        {
+          "id": "p2",
+          "type": "predicate",
+          "description": "RedisModule_StringToLongLong(argv[2], &capacity)",
+          "location": 9
+        },
+        {
+          "id": "p3",
+          "type": "predicate",
+          "description": "mi_loc != -1",
+          "location": 15
+        },
+        {
+          "id": "p4",
+          "type": "predicate",
+          "description": "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+          "location": 16
+        },
+        {
+          "id": "p5",
+          "type": "predicate",
+          "description": "bs_loc != -1",
+          "location": 26
+        },
+        {
+          "id": "p6",
+          "type": "predicate",
+          "description": "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+          "location": 27
+        },
+        {
+          "id": "p7",
+          "type": "predicate",
+          "description": "ex_loc != -1",
+          "location": 37
+        },
+        {
+          "id": "p8",
+          "type": "predicate",
+          "description": "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+          "location": 38
+        },
+        {
+          "id": "p9",
+          "type": "predicate",
+          "description": "bucketSize * 2 > capacity",
+          "location": 46
+        },
+        {
+          "id": "p10",
+          "type": "predicate",
+          "description": "status != SB_EMPTY",
+          "location": 53
+        },
+        {
+          "id": "p11",
+          "type": "predicate",
+          "description": "cf == NULL",
+          "location": 58
+        }
+      ],
+      "edges": [
+        {
+          "source": "p1",
+          "target": "v1",
+          "edge_type": "symbolic",
+          "rationale": "Condition 'argc < 3 || (argc % 2) == 0' satisfied on path"
+        },
+        {
+          "source": "p2",
+          "target": "v1",
+          "edge_type": "symbolic",
+          "rationale": "Condition 'RedisModule_StringToLongLong(argv[2], &capacity)' satisfied on path"
+        },
+        {
+          "source": "p3",
+          "target": "v1",
+          "edge_type": "symbolic",
+          "rationale": "Condition 'mi_loc != -1' satisfied on path"
+        },
+        {
+          "source": "p4",
+          "target": "v1",
+          "edge_type": "symbolic",
+          "rationale": "Condition 'RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK' satisfied on path"
+        },
+        {
+          "source": "p5",
+          "target": "v1",
+          "edge_type": "symbolic",
+          "rationale": "Condition 'bs_loc != -1' satisfied on path"
+        },
+        {
+          "source": "p6",
+          "target": "v1",
+          "edge_type": "symbolic",
+          "rationale": "Condition 'RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK' satisfied on path"
+        },
+        {
+          "source": "p7",
+          "target": "v1",
+          "edge_type": "symbolic",
+          "rationale": "Condition 'ex_loc != -1' satisfied on path"
+        },
+        {
+          "source": "p8",
+          "target": "v1",
+          "edge_type": "symbolic",
+          "rationale": "Condition 'RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK' satisfied on path"
+        },
+        {
+          "source": "p9",
+          "target": "v1",
+          "edge_type": "symbolic",
+          "rationale": "Condition 'bucketSize * 2 > capacity' satisfied on path"
+        },
+        {
+          "source": "p10",
+          "target": "v1",
+          "edge_type": "symbolic",
+          "rationale": "Condition 'status != SB_EMPTY' satisfied on path"
+        },
+        {
+          "source": "p11",
+          "target": "v1",
+          "edge_type": "symbolic",
+          "rationale": "Condition 'cf == NULL' satisfied on path"
+        }
+      ],
+      "diagnostics": {
+        "static_trace": [
+          "Registered vulnerability node v1 @ line 13",
+          "Static backward slice nodes: v1"
+        ],
+        "dynamic_lines": [
+          13
+        ],
+        "symbolic_conditions": [
+          "argc < 3 || (argc % 2) == 0",
+          "RedisModule_StringToLongLong(argv[2], &capacity)",
+          "mi_loc != -1",
+          "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+          "bs_loc != -1",
+          "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+          "ex_loc != -1",
+          "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+          "bucketSize * 2 > capacity",
+          "status != SB_EMPTY",
+          "cf == NULL"
+        ],
+        "clang_nodes": [],
+        "angr_paths": []
+      }
+    },
+    "scm": {
+      "variables": {
+        "V_v1": {
+          "name": "V_v1",
+          "var_type": "bool",
+          "domain": []
+        },
+        "V_p1": {
+          "name": "V_p1",
+          "var_type": "bool",
+          "domain": []
+        },
+        "V_p2": {
+          "name": "V_p2",
+          "var_type": "bool",
+          "domain": []
+        },
+        "V_p3": {
+          "name": "V_p3",
+          "var_type": "bool",
+          "domain": []
+        },
+        "V_p4": {
+          "name": "V_p4",
+          "var_type": "bool",
+          "domain": []
+        },
+        "V_p5": {
+          "name": "V_p5",
+          "var_type": "bool",
+          "domain": []
+        },
+        "V_p6": {
+          "name": "V_p6",
+          "var_type": "bool",
+          "domain": []
+        },
+        "V_p7": {
+          "name": "V_p7",
+          "var_type": "bool",
+          "domain": []
+        },
+        "V_p8": {
+          "name": "V_p8",
+          "var_type": "bool",
+          "domain": []
+        },
+        "V_p9": {
+          "name": "V_p9",
+          "var_type": "bool",
+          "domain": []
+        },
+        "V_p10": {
+          "name": "V_p10",
+          "var_type": "bool",
+          "domain": []
+        },
+        "V_p11": {
+          "name": "V_p11",
+          "var_type": "bool",
+          "domain": []
+        }
+      },
+      "equations": [
+        {
+          "target": "V_v1",
+          "expression": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11  # long long maxIterations = CF_MAX_ITERATIONS;"
+        },
+        {
+          "target": "V_p1",
+          "expression": "exogenous  # argc < 3 || (argc % 2) == 0"
+        },
+        {
+          "target": "V_p2",
+          "expression": "exogenous  # RedisModule_StringToLongLong(argv[2], &capacity)"
+        },
+        {
+          "target": "V_p3",
+          "expression": "exogenous  # mi_loc != -1"
+        },
+        {
+          "target": "V_p4",
+          "expression": "exogenous  # RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK"
+        },
+        {
+          "target": "V_p5",
+          "expression": "exogenous  # bs_loc != -1"
+        },
+        {
+          "target": "V_p6",
+          "expression": "exogenous  # RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK"
+        },
+        {
+          "target": "V_p7",
+          "expression": "exogenous  # ex_loc != -1"
+        },
+        {
+          "target": "V_p8",
+          "expression": "exogenous  # RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK"
+        },
+        {
+          "target": "V_p9",
+          "expression": "exogenous  # bucketSize * 2 > capacity"
+        },
+        {
+          "target": "V_p10",
+          "expression": "exogenous  # status != SB_EMPTY"
+        },
+        {
+          "target": "V_p11",
+          "expression": "exogenous  # cf == NULL"
+        }
+      ],
+      "vulnerable_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11"
+    },
+    "intervention": {
+      "summary": "SMT-derived minimal interventions to break causal chain",
+      "interventions": [
+        {
+          "target_line": 4,
+          "enforce": "ENFORCE NOT V_p1",
+          "rationale": "Prevent argc < 3 || (argc % 2) == 0 from triggering vulnerability"
+        },
+        {
+          "target_line": 9,
+          "enforce": "ENFORCE NOT V_p2",
+          "rationale": "Prevent RedisModule_StringToLongLong(argv[2], &capacity) from triggering vulnerability"
+        },
+        {
+          "target_line": 15,
+          "enforce": "ENFORCE NOT V_p3",
+          "rationale": "Prevent mi_loc != -1 from triggering vulnerability"
+        },
+        {
+          "target_line": 16,
+          "enforce": "ENFORCE NOT V_p4",
+          "rationale": "Prevent RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK from triggering vulnerability"
+        },
+        {
+          "target_line": 26,
+          "enforce": "ENFORCE NOT V_p5",
+          "rationale": "Prevent bs_loc != -1 from triggering vulnerability"
+        },
+        {
+          "target_line": 27,
+          "enforce": "ENFORCE NOT V_p6",
+          "rationale": "Prevent RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK from triggering vulnerability"
+        },
+        {
+          "target_line": 37,
+          "enforce": "ENFORCE NOT V_p7",
+          "rationale": "Prevent ex_loc != -1 from triggering vulnerability"
+        },
+        {
+          "target_line": 38,
+          "enforce": "ENFORCE NOT V_p8",
+          "rationale": "Prevent RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK from triggering vulnerability"
+        },
+        {
+          "target_line": 46,
+          "enforce": "ENFORCE NOT V_p9",
+          "rationale": "Prevent bucketSize * 2 > capacity from triggering vulnerability"
+        },
+        {
+          "target_line": 53,
+          "enforce": "ENFORCE NOT V_p10",
+          "rationale": "Prevent status != SB_EMPTY from triggering vulnerability"
+        },
+        {
+          "target_line": 58,
+          "enforce": "ENFORCE NOT V_p11",
+          "rationale": "Prevent cf == NULL from triggering vulnerability"
+        },
+        {
+          "target_line": -1,
+          "enforce": "INSERT GUARD",
+          "rationale": "Auto-added from feedback"
+        }
+      ]
+    },
+    "patch": {
+      "diff": "--- original.c\n+++ patched.c\n@@ -10,6 +10,20 @@\n         return RedisModule_ReplyWithError(ctx, \"Bad capacity\");\n     }\n \n+    /* --------------------------------------------------------------------\n+     * Validate capacity (must be positive and reasonable)\n+     * -------------------------------------------------------------------- */\n+    if (capacity <= 0) {\n+        return RedisModule_ReplyWithError(ctx, \"CAPACITY parameter needs to be a positive integer\");\n+    }\n+\n+    /* --------------------------------------------------------------------\n+     * Define safe upper bounds for configurable parameters\n+     * -------------------------------------------------------------------- */\n+    const long long MAX_ITERATIONS_LIMIT = 1000;   /* reasonable upper bound */\n+    const long long MAX_BUCKETSIZE_LIMIT = 1024;   /* reasonable upper bound */\n+    const long long MAX_EXPANSION_LIMIT  = 1000;   /* reasonable upper bound */\n+\n     long long maxIterations = CF_MAX_ITERATIONS;\n     int mi_loc = RMUtil_ArgIndex(\"MAXITERATIONS\", argv, argc);\n     if (mi_loc != -1) {\n@@ -18,6 +32,14 @@\n         } else if (maxIterations <= 0) {\n             return RedisModule_ReplyWithError(\n                 ctx, \"MAXITERATIONS parameter needs to be a positive integer\");\n+        } else if (maxIterations > MAX_ITERATIONS_LIMIT) {\n+            return RedisModule_ReplyWithError(\n+                ctx, \"MAXITERATIONS parameter exceeds allowed maximum\");\n+        }\n+    } else {\n+        /* Ensure the default also respects the limit */\n+        if (maxIterations > MAX_ITERATIONS_LIMIT) {\n+            maxIterations = MAX_ITERATIONS_LIMIT;\n         }\n     }\n \n@@ -29,6 +51,13 @@\n         } else if (bucketSize <= 0) {\n             return RedisModule_ReplyWithError(\n                 ctx, \"BUCKETSIZE parameter needs to be a positive integer\");\n+        } else if (bucketSize > MAX_BUCKETSIZE_LIMIT) {\n+            return RedisModule_ReplyWithError(\n+                ctx, \"BUCKETSIZE parameter exceeds allowed maximum\");\n+        }\n+    } else {\n+        if (bucketSize > MAX_BUCKETSIZE_LIMIT) {\n+            bucketSize = MAX_BUCKETSIZE_LIMIT;\n         }\n     }\n \n@@ -40,10 +69,20 @@\n         } else if (expansion < 0) {\n             return RedisModule_ReplyWithError(\n                 ctx, \"EXPANSION parameter needs to be a non-negative integer\");\n+        } else if (expansion > MAX_EXPANSION_LIMIT) {\n+            return RedisModule_ReplyWithError(\n+                ctx, \"EXPANSION parameter exceeds allowed maximum\");\n+        }\n+    } else {\n+        if (expansion > MAX_EXPANSION_LIMIT) {\n+            expansion = MAX_EXPANSION_LIMIT;\n         }\n     }\n \n-    if (bucketSize * 2 > capacity) {\n+    /* --------------------------------------------------------------------\n+     * Validate relationship between bucketSize and capacity safely\n+     * -------------------------------------------------------------------- */\n+    if (bucketSize > capacity / 2) {\n         return RedisModule_ReplyWithError(ctx, \"Capacity must be at least (BucketSize * 2)\");\n     }\n ",
+      "guards": [],
+      "method": "llm[minimal]",
+      "llm_metadata": {
+        "endpoint": "http://115.145.135.227:7220/v1/chat/completions",
+        "model": "openai/gpt-oss-120b"
+      }
+    },
+    "effect": {
+      "signature_found": true,
+      "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+      "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12 AND V_p13 AND V_p14 AND V_p15",
+      "vulnerability_removed": true,
+      "diagnostics": {
+        "static_trace": [
+          "Registered vulnerability node v1 @ line 27",
+          "Static backward slice nodes: v1"
+        ],
+        "dynamic_lines": [
+          27
+        ],
+        "symbolic_conditions": [
+          "argc < 3 || (argc % 2) == 0",
+          "RedisModule_StringToLongLong(argv[2], &capacity)",
+          "capacity <= 0",
+          "mi_loc != -1",
+          "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+          "maxIterations > MAX_ITERATIONS_LIMIT",
+          "bs_loc != -1",
+          "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+          "bucketSize > MAX_BUCKETSIZE_LIMIT",
+          "ex_loc != -1",
+          "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+          "expansion > MAX_EXPANSION_LIMIT",
+          "bucketSize > capacity / 2",
+          "status != SB_EMPTY",
+          "cf == NULL"
+        ],
+        "clang_nodes": [],
+        "angr_paths": []
+      }
+    },
+    "verification": {
+      "symbolic": {
+        "success": false,
+        "details": "No guard inserted; path condition unresolved",
+        "feedback": "Add guard before vulnerability"
+      },
+      "model_check": {
+        "success": true,
+        "details": "Control flow satisfies safety invariants",
+        "feedback": ""
+      },
+      "fuzzing": {
+        "success": false,
+        "details": "Patch does not introduce fail-safe return",
+        "feedback": "Introduce fail-safe path for invalid input"
+      },
+      "overall": false
+    },
+    "iterations": [
+      {
+        "patch_method": "llm[minimal]",
+        "effect": {
+          "signature_found": true,
+          "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+          "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+          "vulnerability_removed": false,
+          "diagnostics": {
+            "static_trace": [
+              "Registered vulnerability node v1 @ line 19",
+              "Static backward slice nodes: v1"
+            ],
+            "dynamic_lines": [
+              19
+            ],
+            "symbolic_conditions": [
+              "argc < 3 || (argc % 2) == 0",
+              "RedisModule_StringToLongLong(argv[2], &capacity)",
+              "mi_loc != -1",
+              "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+              "bs_loc != -1",
+              "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+              "ex_loc != -1",
+              "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+              "bucketSize * 2 > capacity",
+              "status != SB_EMPTY",
+              "cf == NULL"
+            ],
+            "clang_nodes": [],
+            "angr_paths": []
+          }
+        },
+        "verification": {
+          "symbolic": {
+            "success": false,
+            "details": "No guard inserted; path condition unresolved",
+            "feedback": "Add guard before vulnerability"
+          },
+          "model_check": {
+            "success": true,
+            "details": "Control flow satisfies safety invariants",
+            "feedback": ""
+          },
+          "fuzzing": {
+            "success": false,
+            "details": "Patch does not introduce fail-safe return",
+            "feedback": "Introduce fail-safe path for invalid input"
+          },
+          "overall": false
+        }
+      },
+      {
+        "patch_method": "llm[minimal]",
+        "effect": {
+          "signature_found": true,
+          "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+          "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12",
+          "vulnerability_removed": true,
+          "diagnostics": {
+            "static_trace": [
+              "Registered vulnerability node v1 @ line 16",
+              "Static backward slice nodes: v1"
+            ],
+            "dynamic_lines": [
+              16
+            ],
+            "symbolic_conditions": [
+              "argc < 3 || (argc % 2) == 0",
+              "RedisModule_StringToLongLong(argv[2], &capacity)",
+              "maxIterations > MAX_ITERATIONS_UPPER_LIMIT",
+              "mi_loc != -1",
+              "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+              "bs_loc != -1",
+              "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+              "ex_loc != -1",
+              "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+              "bucketSize * 2 > capacity",
+              "status != SB_EMPTY",
+              "cf == NULL"
+            ],
+            "clang_nodes": [],
+            "angr_paths": []
+          }
+        },
+        "verification": {
+          "symbolic": {
+            "success": false,
+            "details": "No guard inserted; path condition unresolved",
+            "feedback": "Add guard before vulnerability"
+          },
+          "model_check": {
+            "success": true,
+            "details": "Control flow satisfies safety invariants",
+            "feedback": ""
+          },
+          "fuzzing": {
+            "success": false,
+            "details": "Patch does not introduce fail-safe return",
+            "feedback": "Introduce fail-safe path for invalid input"
+          },
+          "overall": false
+        }
+      },
+      {
+        "patch_method": "llm[minimal]",
+        "effect": {
+          "signature_found": true,
+          "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+          "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+          "vulnerability_removed": false,
+          "diagnostics": {
+            "static_trace": [
+              "Registered vulnerability node v1 @ line 18",
+              "Static backward slice nodes: v1"
+            ],
+            "dynamic_lines": [
+              18
+            ],
+            "symbolic_conditions": [
+              "argc < 3 || (argc % 2) == 0",
+              "RedisModule_StringToLongLong(argv[2], &capacity)",
+              "mi_loc != -1",
+              "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+              "bs_loc != -1",
+              "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+              "ex_loc != -1",
+              "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+              "bucketSize * 2 > capacity",
+              "status != SB_EMPTY",
+              "cf == NULL"
+            ],
+            "clang_nodes": [],
+            "angr_paths": []
+          }
+        },
+        "verification": {
+          "symbolic": {
+            "success": false,
+            "details": "No guard inserted; path condition unresolved",
+            "feedback": "Add guard before vulnerability"
+          },
+          "model_check": {
+            "success": true,
+            "details": "Control flow satisfies safety invariants",
+            "feedback": ""
+          },
+          "fuzzing": {
+            "success": false,
+            "details": "Patch does not introduce fail-safe return",
+            "feedback": "Introduce fail-safe path for invalid input"
+          },
+          "overall": false
+        }
+      },
+      {
+        "patch_method": "llm[minimal]",
+        "effect": {
+          "signature_found": true,
+          "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+          "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12 AND V_p13 AND V_p14 AND V_p15 AND V_p16 AND V_p17 AND V_p18",
+          "vulnerability_removed": true,
+          "diagnostics": {
+            "static_trace": [
+              "Registered vulnerability node v1 @ line 21",
+              "Static backward slice nodes: v1"
+            ],
+            "dynamic_lines": [
+              21
+            ],
+            "symbolic_conditions": [
+              "argc < 3 || (argc % 2) == 0",
+              "RedisModule_StringToLongLong(argv[2], &capacity) != REDISMODULE_OK",
+              "capacity <= 0",
+              "mi_loc != -1",
+              "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+              "maxIterations <= 0",
+              "maxIterations > MAX_ITERATIONS_UPPER_LIMIT",
+              "bs_loc != -1",
+              "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+              "bucketSize <= 0",
+              "bucketSize > BUCKETSIZE_UPPER_LIMIT",
+              "ex_loc != -1",
+              "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+              "expansion < 0",
+              "expansion > EXPANSION_UPPER_LIMIT",
+              "bucketSize > capacity / 2",
+              "status != SB_EMPTY",
+              "cf == NULL"
+            ],
+            "clang_nodes": [],
+            "angr_paths": []
+          }
+        },
+        "verification": {
+          "symbolic": {
+            "success": false,
+            "details": "No guard inserted; path condition unresolved",
+            "feedback": "Add guard before vulnerability"
+          },
+          "model_check": {
+            "success": true,
+            "details": "Control flow satisfies safety invariants",
+            "feedback": ""
+          },
+          "fuzzing": {
+            "success": false,
+            "details": "Patch does not introduce fail-safe return",
+            "feedback": "Introduce fail-safe path for invalid input"
+          },
+          "overall": false
+        }
+      },
+      {
+        "patch_method": "llm[minimal]",
+        "effect": {
+          "signature_found": true,
+          "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+          "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12 AND V_p13 AND V_p14 AND V_p15",
+          "vulnerability_removed": true,
+          "diagnostics": {
+            "static_trace": [
+              "Registered vulnerability node v1 @ line 27",
+              "Static backward slice nodes: v1"
+            ],
+            "dynamic_lines": [
+              27
+            ],
+            "symbolic_conditions": [
+              "argc < 3 || (argc % 2) == 0",
+              "RedisModule_StringToLongLong(argv[2], &capacity)",
+              "capacity <= 0",
+              "mi_loc != -1",
+              "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+              "maxIterations > MAX_ITERATIONS_LIMIT",
+              "bs_loc != -1",
+              "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+              "bucketSize > MAX_BUCKETSIZE_LIMIT",
+              "ex_loc != -1",
+              "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+              "expansion > MAX_EXPANSION_LIMIT",
+              "bucketSize > capacity / 2",
+              "status != SB_EMPTY",
+              "cf == NULL"
+            ],
+            "clang_nodes": [],
+            "angr_paths": []
+          }
+        },
+        "verification": {
+          "symbolic": {
+            "success": false,
+            "details": "No guard inserted; path condition unresolved",
+            "feedback": "Add guard before vulnerability"
+          },
+          "model_check": {
+            "success": true,
+            "details": "Control flow satisfies safety invariants",
+            "feedback": ""
+          },
+          "fuzzing": {
+            "success": false,
+            "details": "Patch does not introduce fail-safe return",
+            "feedback": "Introduce fail-safe path for invalid input"
+          },
+          "overall": false
+        }
+      }
+    ],
+    "explanations": {
+      "formal": "### Formal Summary\n**Structural equations**\nV_v1 := V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11  # long long maxIterations = CF_MAX_ITERATIONS;\nV_p1 := exogenous  # argc < 3 || (argc % 2) == 0\nV_p2 := exogenous  # RedisModule_StringToLongLong(argv[2], &capacity)\nV_p3 := exogenous  # mi_loc != -1\nV_p4 := exogenous  # RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK\nV_p5 := exogenous  # bs_loc != -1\nV_p6 := exogenous  # RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK\nV_p7 := exogenous  # ex_loc != -1\nV_p8 := exogenous  # RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK\nV_p9 := exogenous  # bucketSize * 2 > capacity\nV_p10 := exogenous  # status != SB_EMPTY\nV_p11 := exogenous  # cf == NULL\n\n**Original vulnerability condition**\nV_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11\n\n**Post-patch condition**\nV_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12 AND V_p13 AND V_p14 AND V_p15\n\n**Inference**: vulnerability removed = True",
+      "natural": "## Vulnerability Fix Explanation\n\n### What was wrong?\n- Location: line 13\n- Issue: long long maxIterations = CF_MAX_ITERATIONS;\n\n### Root cause (from PCG)\n- argc < 3 || (argc % 2) == 0 (line 4)\n- RedisModule_StringToLongLong(argv[2], &capacity) (line 9)\n- mi_loc != -1 (line 15)\n- RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK (line 16)\n- bs_loc != -1 (line 26)\n- RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK (line 27)\n- ex_loc != -1 (line 37)\n- RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK (line 38)\n- bucketSize * 2 > capacity (line 46)\n- status != SB_EMPTY (line 53)\n- cf == NULL (line 58)\n\n### Planned interventions\n- ENFORCE NOT V_p1 @ line 4: Prevent argc < 3 || (argc % 2) == 0 from triggering vulnerability\n- ENFORCE NOT V_p2 @ line 9: Prevent RedisModule_StringToLongLong(argv[2], &capacity) from triggering vulnerability\n- ENFORCE NOT V_p3 @ line 15: Prevent mi_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p4 @ line 16: Prevent RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p5 @ line 26: Prevent bs_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p6 @ line 27: Prevent RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p7 @ line 37: Prevent ex_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p8 @ line 38: Prevent RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p9 @ line 46: Prevent bucketSize * 2 > capacity from triggering vulnerability\n- ENFORCE NOT V_p10 @ line 53: Prevent status != SB_EMPTY from triggering vulnerability\n- ENFORCE NOT V_p11 @ line 58: Prevent cf == NULL from triggering vulnerability\n- INSERT GUARD @ line N/A: Auto-added from feedback\n\n### Patch summary\nApplied method: llm[minimal].\nGuards: None.\nDiff preview:\n--- original.c\n+++ patched.c\n+    /* --------------------------------------------------------------------\n+     * Validate capacity (must be positive and reasonable)\n+     * -------------------------------------------------------------------- */\n+    if (capacity <= 0) {\n+        return RedisModule_ReplyWithError(ctx, \"CAPACITY parameter needs to be a positive integer\");\n+    }\n\n### Why this works\nThe patched condition eliminates the causal prerequisites\n",
+      "prompt_context": "Vulnerability summary:\n- location: line 13\n- description: long long maxIterations = CF_MAX_ITERATIONS;\n\nCausal chain (from PCG):\n- argc < 3 || (argc % 2) == 0 (line 4)\n- RedisModule_StringToLongLong(argv[2], &capacity) (line 9)\n- mi_loc != -1 (line 15)\n- RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK (line 16)\n- bs_loc != -1 (line 26)\n- RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK (line 27)\n- ex_loc != -1 (line 37)\n- RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK (line 38)\n- bucketSize * 2 > capacity (line 46)\n- status != SB_EMPTY (line 53)\n- cf == NULL (line 58)\n\nStructural model condition:\nV_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11\n\nRecommended interventions:\n- ENFORCE NOT V_p1 @ line 4: Prevent argc < 3 || (argc % 2) == 0 from triggering vulnerability\n- ENFORCE NOT V_p2 @ line 9: Prevent RedisModule_StringToLongLong(argv[2], &capacity) from triggering vulnerability\n- ENFORCE NOT V_p3 @ line 15: Prevent mi_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p4 @ line 16: Prevent RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p5 @ line 26: Prevent bs_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p6 @ line 27: Prevent RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p7 @ line 37: Prevent ex_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p8 @ line 38: Prevent RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p9 @ line 46: Prevent bucketSize * 2 > capacity from triggering vulnerability\n- ENFORCE NOT V_p10 @ line 53: Prevent status != SB_EMPTY from triggering vulnerability\n- ENFORCE NOT V_p11 @ line 58: Prevent cf == NULL from triggering vulnerability\n- INSERT GUARD @ line N/A: Auto-added from feedback"
+    },
+    "case": {
+      "expected_success": true,
+      "cwe_id": "CWE-125",
+      "cve_id": "CVE-2024-25116",
+      "metadata": {
+        "line_hint": "13.c",
+        "range": "1-64",
+        "dataset": "zeroday_repair",
+        "path": "/home/hjs/research/vuln_repair_explanation/datasets/zeroday_repair/CWE-125___CVE-2024-25116.c___1-64___13.c"
+      },
+      "ground_truth_preview": "static int CFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {\n    RedisModule_AutoMemory(ctx);\n\n    if (argc < 3 || (argc % 2) == 0) {\n        return RedisModule_WrongArity(ctx);\n    }\n\n    long long capacity;\n    if (RedisModule_StringToLongLong(argv[2], &capacity)) {\n        return RedisModule_ReplyWithError(ctx, \"Bad capacity\");\n    }\n\n    long long maxIterations = CF_DEFAULT_MAX_ITERATIONS;\n    int mi_loc = RMUtil_ArgIndex(\"MAXITERATIONS\", argv, argc);\n    if (mi_loc != -1) {\n        if (RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK) {\n            return RedisModule_ReplyWithError(ctx, \"Couldn't parse MAXITERATIONS\");\n        } else if (maxIterations <= 0 || maxIterations > CF_MAX_ITERATIONS) {\n            return RedisModule_ReplyWithError(\n                ctx, \"MAXITERATIONS: value must be an integer between 1 and 65535, inclusive.\");\n        }\n    }\n\n    long long bucketSize = CF_DEFAULT_BUCKETSIZE;\n    int bs_loc = RMUtil_ArgIndex(\"BUCKETSIZE\", argv, argc);\n    if (bs_loc != -1) {\n        if (RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK) {\n            return RedisModule_ReplyWithError(ctx, \"Couldn't parse BUCKETSIZE\");\n        } else if (bucketSize <= 0 || bucketSize > CF_MAX_BUCKET_SIZE) {\n            return RedisModule_ReplyWithError(\n                ctx, \"BUCKETSIZE: value must be an integer between 1 and 255, inclusive.\");\n        }\n    }\n\n    long long expansion = CF_DEFAULT_EXPANSION;\n    int ex_loc = RMUtil_ArgIndex(\"EXPANSION\", argv, argc);\n    if (ex_loc != -1) {\n        if (RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK) {\n            return RedisModule_ReplyWithError(ctx, \"Couldn't parse EXPANSION\");\n        } else if (expansion < 0 || expansion > CF_MAX_EXPANSION) {",
+      "strategy": "minimal"
+    }
+  }
+}
