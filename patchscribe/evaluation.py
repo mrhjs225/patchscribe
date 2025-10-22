@@ -1,12 +1,12 @@
 """
-Evaluation utilities for aggregating CPG-Verify PoC results into basic metrics.
+Evaluation utilities for aggregating PatchScribe PoC results into basic metrics.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional
 
-from .pipeline import CPGVerifyPipeline, PipelineArtifacts
+from .pipeline import PatchScribePipeline, PipelineArtifacts
 
 
 @dataclass
@@ -46,8 +46,8 @@ class EvaluationReport:
 
 
 class Evaluator:
-    def __init__(self, pipeline: CPGVerifyPipeline | None = None) -> None:
-        self.pipeline = pipeline or CPGVerifyPipeline()
+    def __init__(self, pipeline: PatchScribePipeline | None = None) -> None:
+        self.pipeline = pipeline or PatchScribePipeline()
 
     def run(self, cases: Iterable[Dict[str, object]]) -> EvaluationReport:
         evaluations: List[CaseEvaluation] = []

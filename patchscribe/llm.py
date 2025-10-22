@@ -40,17 +40,17 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        provider = os.environ.get("CPG_VERIFY_LLM_PROVIDER", "openai").lower()
-        endpoint = os.environ.get("CPG_VERIFY_LLM_ENDPOINT")
-        model = os.environ.get("CPG_VERIFY_LLM_MODEL")
+        provider = os.environ.get("PATCHSCRIBE_LLM_PROVIDER", "openai").lower()
+        endpoint = os.environ.get("PATCHSCRIBE_LLM_ENDPOINT")
+        model = os.environ.get("PATCHSCRIBE_LLM_MODEL")
         if not model:
             model = "llama3.2:1b" if provider == "ollama" else "openai/gpt-oss-120b"
         return cls(
             provider=provider,
             endpoint=endpoint,
-            api_key=os.environ.get("CPG_VERIFY_LLM_API_KEY"),
+            api_key=os.environ.get("PATCHSCRIBE_LLM_API_KEY"),
             model=model,
-            timeout=int(os.environ.get("CPG_VERIFY_LLM_TIMEOUT", "60")),
+            timeout=int(os.environ.get("PATCHSCRIBE_LLM_TIMEOUT", "60")),
         )
 
 

@@ -2,7 +2,7 @@ import os
 from time import time
 
 BASE = (
-    "python -m cpg_verify.cli "
+    "python -m patchscribe.cli "
     "--dataset zeroday "
     "--limit 20 "
     "--explain-mode both "

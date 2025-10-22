@@ -1,5 +1,5 @@
 """
-Natural-language and structured explanation utilities for CPG-Verify.
+Natural-language and structured explanation utilities for PatchScribe.
 """
 from __future__ import annotations
 

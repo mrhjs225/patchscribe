@@ -1,6 +1,6 @@
-# CPG-Verify PoC
+# PatchScribe PoC
 
-CPG-Verify는 취약점에 대한 인과적 설명을 구축하고, LLM 기반 패치 생성을 안내하며, 
+PatchScribe는 취약점에 대한 인과적 설명을 구축하고, LLM 기반 패치 생성을 안내하며, 
 형식적 설명과 자연어 설명을 모두 생성하는 개념 증명(Proof-of-Concept) 파이프라인입니다. 
 현재 저장소는 APPATCH 데이터셋(`zeroday_repair` 하위 집합에 중점)에 대해 파이프라인을 
 실행하고 수동 검사를 위한 결과를 수집하는 데 중점을 두고 있습니다.
@@ -9,7 +9,7 @@ CPG-Verify는 취약점에 대한 인과적 설명을 구축하고, LLM 기반 �
 
 ```
 .
-├── cpg_verify/
+├── patchscribe/
 │   ├── analysis/              # 휴리스틱 정적/동적/기호 분석기
 │   ├── tools/                 # 선택적 래퍼 (clang, angr)
 │   ├── dataset.py             # poc/zeroday 데이터셋 로더
@@ -33,10 +33,10 @@ CPG-Verify는 취약점에 대한 인과적 설명을 구축하고, LLM 기반 �
 
 ```
 # 기본 PoC 데이터셋 실행 (휴리스틱 toy 예제)
-python -m cpg_verify.cli
+python -m patchscribe.cli
 
 # ID로 특정 케이스 실행
-python -m cpg_verify.cli buffer_overflow_simple
+python -m patchscribe.cli buffer_overflow_simple
 ```
 
 ### 전략 (C1–C3)
@@ -65,7 +65,7 @@ python -m cpg_verify.cli buffer_overflow_simple
 
 zeroday 데이터셋에서 (C3) 예제 실행 (처음 5개 샘플):
 ```
-python -m cpg_verify.cli --dataset zeroday --limit 5 --strategy natural
+python -m patchscribe.cli --dataset zeroday --limit 5 --strategy natural
 ```
 
 ### 결과 저장
@@ -75,7 +75,7 @@ python -m cpg_verify.cli --dataset zeroday --limit 5 --strategy natural
 `--format markdown`을 선택할 수 있습니다.
 
 ```
-python -m cpg_verify.cli \
+python -m patchscribe.cli \
     --dataset zeroday --limit 20 --strategy formal \
     --explain-mode both \
     --output results/zeroday_formal.md --format markdown
@@ -85,7 +85,7 @@ python -m cpg_verify.cli \
 
 집계 메트릭(성공률, 정답 일치 등)을 평가합니다:
 ```
-python -m cpg_verify.cli \
+python -m patchscribe.cli \
     --dataset zeroday --limit 20 --strategy formal \
     --evaluate --output results/zeroday_metrics.json
 ```
@@ -100,22 +100,22 @@ python -m cpg_verify.cli \
 ./scripts/setup_ollama_models.sh
 ```
 
-`cpg_verify.cli`를 호출하기 전에 다음 변수를 내보내 파이프라인이 Ollama를 
+`patchscribe.cli`를 호출하기 전에 다음 변수를 내보내 파이프라인이 Ollama를 
 대상으로 하도록 구성합니다:
 
 ```
-export CPG_VERIFY_LLM_PROVIDER=ollama
+export PATCHSCRIBE_LLM_PROVIDER=ollama
 # 예제 모델: qwen3:0.6b, DeepSeek-R1:1.5b, gemma3:1b, gpt-oss:20b, Llama3.2:1b
-export CPG_VERIFY_LLM_MODEL=Llama3.2:1b
+export PATCHSCRIBE_LLM_MODEL=Llama3.2:1b
 # Ollama가 기본 포트에서 실행되는 경우 선택 사항:
-export CPG_VERIFY_LLM_ENDPOINT=http://127.0.0.1:11434/api/chat
-python -m cpg_verify.cli --dataset zeroday --limit 1 --strategy formal
+export PATCHSCRIBE_LLM_ENDPOINT=http://127.0.0.1:11434/api/chat
+python -m patchscribe.cli --dataset zeroday --limit 1 --strategy formal
 ```
 
 동일한 구성을 CLI 옵션으로 직접 전달할 수도 있습니다:
 
 ```
-python -m cpg_verify.cli \
+python -m patchscribe.cli \
     --dataset zeroday --limit 1 --strategy formal \
     --llm-provider ollama --llm-model Llama3.2:1b
 ```

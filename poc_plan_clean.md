@@ -1,8 +1,8 @@
-# CPG-Verify PoC 계획서
+# PatchScribe PoC 계획서
 
 ## Executive Summary
 
-**프로젝트명**: CPG-Verify (Causal Program Graph based Vulnerability Verification)
+**프로젝트명**: PatchScribe (Causal Program Graph based Vulnerability Verification)
 
 **목적**: LLM 기반 취약점 패치에 대한 기계 검증 가능한 인과적 설명을 생성하는 프레임워크의 실현가능성 입증
 
@@ -374,7 +374,7 @@ def run_poc_experiments():
         vrpilot_results = run_baseline_vrpilot(test_case)
         
         all_results[test_case['id']] = {
-            'cpg_verify': cpg_results,
+            'patchscribe': cpg_results,
             'baselines': {
                 'gpt4': gpt4_results,
                 'vrpilot': vrpilot_results
@@ -421,7 +421,7 @@ comparative_goals = {
 
 ```python
 expected_results = {
-    'cpg_verify': {
+    'patchscribe': {
         'success_rate': 0.70,        # 70%
         'false_positive': 0.05,      # 5%
         'avg_time': 120,             # 2분

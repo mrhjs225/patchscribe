@@ -1,5 +1,5 @@
 """
-Program Causal Graph primitives used throughout the CPG-Verify PoC.
+Program Causal Graph primitives used throughout the PatchScribe PoC.
 """
 from __future__ import annotations
 

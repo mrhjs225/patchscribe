@@ -1,4 +1,4 @@
-"""Optional tool integrations for CPG-Verify."""
+"""Optional tool integrations for PatchScribe."""
 
 from .clang_analysis import ClangStaticAnalyzer
 from .angr_explorer import AngrExplorer

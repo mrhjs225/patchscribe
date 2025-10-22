@@ -1,4 +1,4 @@
-"""Dataset loaders for CPG-Verify PoC and research evaluation."""
+"""Dataset loaders for PatchScribe PoC and research evaluation."""
 from __future__ import annotations
 
 from dataclasses import dataclass

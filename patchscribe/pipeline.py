@@ -1,5 +1,5 @@
 """
-High-level orchestration of the CPG-Verify proof-of-concept workflow.
+High-level orchestration of the PatchScribe proof-of-concept workflow.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class PipelineArtifacts:
     explanations: ExplanationBundle
 
 
-class CPGVerifyPipeline:
+class PatchScribePipeline:
     def __init__(
         self,
         config: PCGBuilderConfig | None = None,

@@ -1,5 +1,5 @@
 """
-Command-line entry point for executing the CPG-Verify PoC pipeline.
+Command-line entry point for executing the PatchScribe PoC pipeline.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Dict, Optional
 
 from .dataset import load_cases
 from .evaluation import Evaluator
-from .pipeline import CPGVerifyPipeline
+from .pipeline import PatchScribePipeline
 from .baselines import BASELINES
 
 
@@ -57,7 +57,7 @@ def _emit_output(data, output_path: str | None, fmt: str) -> None:
 def _format_markdown(data: Dict[str, object]) -> str:
     lines: list[str] = []
     if "metrics" in data and "cases" in data:
-        lines.append("# CPG-Verify Evaluation Report\n")
+        lines.append("# PatchScribe Evaluation Report\n")
         lines.append("## Metrics\n")
         for key, value in data["metrics"].items():
             lines.append(f"- **{key}**: {value}")
@@ -65,7 +65,7 @@ def _format_markdown(data: Dict[str, object]) -> str:
         for case in data["cases"]:
             lines.extend(_format_case_markdown(case))
     else:
-        lines.append("# CPG-Verify Run Results\n")
+        lines.append("# PatchScribe Run Results\n")
         for case_id, case_data in data.items():
             lines.append(f"## Case: {case_id}\n")
             case_meta = case_data.get("case", {})
@@ -193,7 +193,7 @@ def _run_baselines(case: Dict[str, object], artifacts) -> Dict[str, object]:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Run CPG-Verify PoC pipeline")
+    parser = argparse.ArgumentParser(description="Run PatchScribe PoC pipeline")
     parser.add_argument("case_id", nargs="?", help="Dataset case identifier to process")
     parser.add_argument(
         "--evaluate",
@@ -246,20 +246,20 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--llm-model",
-        help="Override LLM model identifier (sets CPG_VERIFY_LLM_MODEL).",
+        help="Override LLM model identifier (sets PATCHSCRIBE_LLM_MODEL).",
     )
     parser.add_argument(
         "--llm-provider",
-        help="Override LLM provider name (sets CPG_VERIFY_LLM_PROVIDER).",
+        help="Override LLM provider name (sets PATCHSCRIBE_LLM_PROVIDER).",
     )
     parser.add_argument(
         "--llm-endpoint",
-        help="Override LLM HTTP endpoint (sets CPG_VERIFY_LLM_ENDPOINT).",
+        help="Override LLM HTTP endpoint (sets PATCHSCRIBE_LLM_ENDPOINT).",
     )
     parser.add_argument(
         "--llm-timeout",
         type=int,
-        help="Override LLM request timeout in seconds (sets CPG_VERIFY_LLM_TIMEOUT).",
+        help="Override LLM request timeout in seconds (sets PATCHSCRIBE_LLM_TIMEOUT).",
     )
     parser.add_argument(
         "--explanation-prompt",
@@ -272,13 +272,13 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.llm_provider:
-        os.environ["CPG_VERIFY_LLM_PROVIDER"] = args.llm_provider
+        os.environ["PATCHSCRIBE_LLM_PROVIDER"] = args.llm_provider
     if args.llm_model:
-        os.environ["CPG_VERIFY_LLM_MODEL"] = args.llm_model
+        os.environ["PATCHSCRIBE_LLM_MODEL"] = args.llm_model
     if args.llm_endpoint:
-        os.environ["CPG_VERIFY_LLM_ENDPOINT"] = args.llm_endpoint
+        os.environ["PATCHSCRIBE_LLM_ENDPOINT"] = args.llm_endpoint
     if args.llm_timeout is not None:
-        os.environ["CPG_VERIFY_LLM_TIMEOUT"] = str(args.llm_timeout)
+        os.environ["PATCHSCRIBE_LLM_TIMEOUT"] = str(args.llm_timeout)
 
     extra_prompt = args.explanation_prompt or ""
     if args.explanation_prompt_file:
@@ -300,7 +300,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.evaluate:
         report = Evaluator(
-            CPGVerifyPipeline(
+            PatchScribePipeline(
                 strategy=args.strategy,
                 explain_mode=args.explain_mode,
                 explanation_patch_source=args.explanation_patch_source,
@@ -311,7 +311,7 @@ def main(argv: list[str] | None = None) -> None:
         _emit_output(data, args.output, args.format)
         return
 
-    pipeline = CPGVerifyPipeline(
+    pipeline = PatchScribePipeline(
         strategy=args.strategy,
         explain_mode=args.explain_mode,
         explanation_patch_source=args.explanation_patch_source,
