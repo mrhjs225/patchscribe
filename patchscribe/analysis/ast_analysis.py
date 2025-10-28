@@ -129,85 +129,90 @@ class ASTAnalyzer:
         return node
 
 
-class _CausalVisitor(c_ast.NodeVisitor):  # type: ignore[misc]
-    def __init__(
-        self,
-        *,
-        graph: ProgramCausalGraph,
-        generator,
-        vuln_tokens: Sequence[str],
-        vuln_line: int,
-        register,
-        trace: List[str],
-    ) -> None:
-        self.graph = graph
-        self.gen = generator
-        self.tokens = set(vuln_tokens)
-        self.vuln_line = vuln_line
-        self.register = register
-        self.trace = trace
+# Only define _CausalVisitor if pycparser is available
+if c_ast is not None:
+    class _CausalVisitor(c_ast.NodeVisitor):  # type: ignore[misc]
+        def __init__(
+            self,
+            *,
+            graph: ProgramCausalGraph,
+            generator,
+            vuln_tokens: Sequence[str],
+            vuln_line: int,
+            register,
+            trace: List[str],
+        ) -> None:
+            self.graph = graph
+            self.gen = generator
+            self.tokens = set(vuln_tokens)
+            self.vuln_line = vuln_line
+            self.register = register
+            self.trace = trace
 
-    # Generic visit ensures traversal continues even when specific handlers fail.
-    def generic_visit(self, node):  # pragma: no cover - pycparser internals
-        for _, child in node.children():
-            self.visit(child)
+        # Generic visit ensures traversal continues even when specific handlers fail.
+        def generic_visit(self, node):  # pragma: no cover - pycparser internals
+            for _, child in node.children():
+                self.visit(child)
 
-    def visit_Assignment(self, node):  # type: ignore[override]
-        coord = getattr(node, "coord", None)
-        line = getattr(coord, "line", None)
-        if not line or line > self.vuln_line:
-            return
-        text = self.gen.visit(node)
-        if not self._mentions_vulnerability(text):
-            return
-        self.register(
-            self.graph,
-            node_type="assignment",
-            description=text,
-            line=line,
-        )
+        def visit_Assignment(self, node):  # type: ignore[override]
+            coord = getattr(node, "coord", None)
+            line = getattr(coord, "line", None)
+            if not line or line > self.vuln_line:
+                return
+            text = self.gen.visit(node)
+            if not self._mentions_vulnerability(text):
+                return
+            self.register(
+                self.graph,
+                node_type="assignment",
+                description=text,
+                line=line,
+            )
 
-    def visit_FuncCall(self, node):  # type: ignore[override]
-        coord = getattr(node, "coord", None)
-        line = getattr(coord, "line", None)
-        if not line or line > self.vuln_line:
-            return
-        text = self.gen.visit(node)
-        if not self._mentions_vulnerability(text):
-            return
-        self.register(
-            self.graph,
-            node_type="call",
-            description=text,
-            line=line,
-        )
+        def visit_FuncCall(self, node):  # type: ignore[override]
+            coord = getattr(node, "coord", None)
+            line = getattr(coord, "line", None)
+            if not line or line > self.vuln_line:
+                return
+            text = self.gen.visit(node)
+            if not self._mentions_vulnerability(text):
+                return
+            self.register(
+                self.graph,
+                node_type="call",
+                description=text,
+                line=line,
+            )
 
-    def visit_If(self, node):  # type: ignore[override]
-        coord = getattr(node, "coord", None)
-        line = getattr(coord, "line", None)
-        if not line or line > self.vuln_line:
-            return
-        cond_text = self.gen.visit(node.cond)
-        if not self._mentions_vulnerability(cond_text):
-            return
-        self.register(
-            self.graph,
-            node_type="predicate",
-            description=cond_text,
-            line=line,
-        )
-        # Continue traversal into branches to discover additional dependencies.
-        self.visit(node.iftrue)
-        if node.iffalse:
-            self.visit(node.iffalse)
+        def visit_If(self, node):  # type: ignore[override]
+            coord = getattr(node, "coord", None)
+            line = getattr(coord, "line", None)
+            if not line or line > self.vuln_line:
+                return
+            cond_text = self.gen.visit(node.cond)
+            if not self._mentions_vulnerability(cond_text):
+                return
+            self.register(
+                self.graph,
+                node_type="predicate",
+                description=cond_text,
+                line=line,
+            )
+            # Continue traversal into branches to discover additional dependencies.
+            self.visit(node.iftrue)
+            if node.iffalse:
+                self.visit(node.iffalse)
 
-    def _mentions_vulnerability(self, text: str) -> bool:
-        if not text:
+        def _mentions_vulnerability(self, text: str) -> bool:
+            if not text:
+                return False
+            for token in self.tokens:
+                if token and token in text:
+                    return True
             return False
-        for token in self.tokens:
-            if token and token in text:
-                return True
-        return False
+else:
+    # Fallback when pycparser is not available
+    _CausalVisitor = None  # type: ignore[misc,assignment]
 
 
 def _tokenize(line: str) -> List[str]:
