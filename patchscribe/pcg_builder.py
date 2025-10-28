@@ -6,6 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
+from .analysis.ast_analysis import ASTAnalyzer
 from .analysis.dynamic_analysis import TaintAnalyzer
 from .analysis.static_analysis import StaticAnalyzer
 from .analysis.symbolic_analysis import SymbolicExplorer
@@ -29,6 +30,7 @@ class PCGBuilder:
 
     def build(self) -> Tuple[ProgramCausalGraph, Dict[str, object]]:
         static = StaticAnalyzer(self.program, self.vuln_info["location"]).run()
+        ast_result = ASTAnalyzer(self.program, self.vuln_info["location"]).run()
         clang_result = ClangStaticAnalyzer(self.program).run(self.vuln_info["location"])
         dynamic = TaintAnalyzer(
             self.program,
@@ -37,7 +39,7 @@ class PCGBuilder:
         ).run()
         symbolic = SymbolicExplorer(self.program, self.vuln_info["location"]).run()
         angr_result = AngrExplorer(self.program).run()
-        graphs = [static.graph, dynamic.graph, symbolic.graph]
+        graphs = [static.graph, ast_result.graph, dynamic.graph, symbolic.graph]
         if clang_result:
             graphs.append(self._graph_from_clang(clang_result))
         if angr_result:
@@ -45,6 +47,7 @@ class PCGBuilder:
         combined = self._merge_graphs(graphs)
         metadata = {
             "static_trace": static.trace,
+            "ast_trace": ast_result.trace,
             "dynamic_lines": dynamic.executed_lines,
             "symbolic_conditions": symbolic.path_conditions,
             "clang_nodes": [node.__dict__ for node in clang_result.nodes] if clang_result else [],

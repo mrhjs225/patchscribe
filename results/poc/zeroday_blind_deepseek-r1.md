@@ -1675,7 +1675,7 @@ static void gsm0_receive(struct gsm_mux *gsm, unsigned char c)
         break;
     }
   }
-```
+
 
 **Evaluation**
 - Clarity:

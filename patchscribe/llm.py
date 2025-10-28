@@ -112,6 +112,18 @@ class LLMClient:
         )
         return content.strip()
 
+    def score_explanation(self, prompt: str) -> Optional[str]:
+        if not self.available():
+            return None
+        content = self._post_chat(
+            [
+                {"role": "system", "content": self._judge_system_prompt()},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+        )
+        return content.strip()
+
     def _post_chat(self, messages: List[Dict[str, str]], *, temperature: float) -> str:
         payload = self._build_payload(messages, temperature=temperature)
         try:
@@ -204,6 +216,12 @@ class LLMClient:
         return (
             "You are a security engineer who writes concise, technically accurate explanations "
             "for vulnerability fixes. Respond in Markdown and avoid speculative statements."
+        )
+
+    @staticmethod
+    def _judge_system_prompt() -> str:
+        return (
+            "You are a strict security reviewer who only outputs valid JSON objects with scoring metrics."
         )
 
     @staticmethod

@@ -242,7 +242,13 @@ def _summarize_patch(patch: PatchResult) -> str:
     else:
         preview_text = "(No diff generated)"
     applied = ", ".join(patch.applied_guards) if patch.applied_guards else "None"
-    return f"Applied method: {patch.method}.\nGuards: {applied}.\nDiff preview:\n{preview_text}"
+    notes = ", ".join(patch.notes) if patch.notes else "None"
+    return (
+        f"Applied method: {patch.method}.\n"
+        f"Guards: {applied}.\n"
+        f"Notes: {notes}.\n"
+        f"Diff preview:\n{preview_text}"
+    )
 
 
 def _build_llm_prompt(
@@ -385,6 +391,8 @@ def _describe_patch_changes(patch: PatchResult) -> str:
         lines.append(f"- 추가된 가드: {guards}")
     else:
         lines.append("- 추가된 가드: 없음")
+    if patch.notes:
+        lines.append(f"- 메모: {', '.join(patch.notes)}")
     if patch.diff:
         diff_lines = [
             line

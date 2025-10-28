@@ -37,6 +37,7 @@ def _serialize_patch(patch) -> Dict[str, object]:
         "method": patch.method,
         "llm_metadata": patch.llm_metadata,
         "patched_code": patch.patched_code,
+        "notes": patch.notes,
     }
 
 
@@ -121,6 +122,24 @@ def _format_markdown(data: Dict[str, object]) -> str:
                 lines.append("```")
                 lines.append(llm_prompt)
                 lines.append("```")
+            explanation_metrics = case_data.get("explanation_metrics") or {}
+            if explanation_metrics:
+                lines.append("\n### Explanation Metrics\n")
+                coverage = explanation_metrics.get("checklist_coverage")
+                if isinstance(coverage, (int, float)):
+                    lines.append(f"- Checklist coverage: {coverage:.2f}")
+                missing = explanation_metrics.get("missing_items") or []
+                if missing:
+                    lines.append(f"- Missing items: {', '.join(missing)}")
+                llm_scores = explanation_metrics.get("llm_scores") or {}
+                if isinstance(llm_scores, dict) and llm_scores:
+                    formatted = ", ".join(
+                        f"{key}={value:.2f}"
+                        for key, value in llm_scores.items()
+                        if isinstance(value, (int, float))
+                    )
+                    if formatted:
+                        lines.append(f"- LLM scores: {formatted}")
             lines.append("\n---\n")
     return "\n".join(lines).strip() + "\n"
 
@@ -132,6 +151,20 @@ def _format_case_markdown(case: Dict[str, object]) -> list[str]:
     lines.append(f"- **Actual success**: {case['actual_success']}")
     patch = case.get("patch", {})
     lines.append(f"- **Patch method**: {patch.get('method')}")
+    metrics = case.get("explanation_metrics") or {}
+    if metrics:
+        coverage = metrics.get("checklist_coverage")
+        if isinstance(coverage, (int, float)):
+            lines.append(f"- **Explanation checklist**: {coverage:.2f}")
+        llm_scores = metrics.get("llm_scores") or {}
+        if isinstance(llm_scores, dict) and llm_scores:
+            formatted = ", ".join(
+                f"{key}={value:.2f}"
+                for key, value in llm_scores.items()
+                if isinstance(value, (int, float))
+            )
+            if formatted:
+                lines.append(f"- **Explanation LLM scores**: {formatted}")
     lines.append("\n#### Verification\n")
     for stage, outcome in case.get("verification", {}).items():
         if isinstance(outcome, dict):
@@ -339,6 +372,7 @@ def main(argv: list[str] | None = None) -> None:
                 "prompt_context": artifacts.explanations.prompt_context,
                 "llm_prompt": artifacts.explanations.llm_prompt,
             },
+            "explanation_metrics": artifacts.explanation_metrics,
             "case": {
                 "expected_success": case.get("expected_success"),
                 "cwe_id": case.get("cwe_id"),

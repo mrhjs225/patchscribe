@@ -1,0 +1,294 @@
+{
+  "cases": [
+    {
+      "case_id": "sample_001",
+      "expected_success": true,
+      "actual_success": true,
+      "verification": {
+        "symbolic": {
+          "success": true,
+          "details": "Ground truth patch assumed to cover causal predicates",
+          "feedback": ""
+        },
+        "model_check": {
+          "success": true,
+          "details": "Ground truth patch assumed verified",
+          "feedback": ""
+        },
+        "fuzzing": {
+          "success": true,
+          "details": "Ground truth patch trusted for runtime behaviour",
+          "feedback": ""
+        },
+        "overall": true
+      },
+      "patch": {
+        "guards": [],
+        "diff": "--- original.c\n+++ patched.c\n@@ -1,5 +1,8 @@\n int process_data(char *input, int len) {\n     char buffer[256];\n-    memcpy(buffer, input, len);  // Vulnerable: no bounds check\n+    if (len > 256) {\n+        return -1;  // Error: input too large\n+    }\n+    memcpy(buffer, input, len);\n     return 0;\n }",
+        "method": "ground_truth",
+        "matches_ground_truth": true,
+        "notes": []
+      },
+      "effect": {
+        "signature_found": false,
+        "original_condition": "True",
+        "patched_condition": "False",
+        "vulnerability_removed": true,
+        "diagnostics": {
+          "reason": "Signature removed from patched code"
+        }
+      },
+      "iterations": [
+        {
+          "patch_method": "noop",
+          "effect": {
+            "signature_found": false,
+            "original_condition": "True",
+            "patched_condition": "False",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "reason": "Signature removed from patched code"
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpsst9cyxy/patch.c: In function \u2018process_data\u2019:\n/tmp/tmpsst9cyxy/patch.c:3:5: error: implicit declaration of function \u2018memcpy\u2019 [-Werror=implicit-function-declaration]\n    3 |     memcpy(buffer, input, len);  // Vulnerable: no bounds check\n      |     ^~~~~~\n/tmp/tmpsst9cyxy/patch.c:1:1: note: include \u2018<string.h>\u2019 or provide a declaration of \u2018memcpy\u2019\n  +++ |+#include <string.h>\n    1 | int process_data(char *input, int len) {\n/tmp/tmpsst9cyxy/patch.c:3:5: error: incompatible implicit declaration of built-in function \u2018memcpy\u2019 [-Werror=builtin-declaration-mismatch]\n    3 |     memcpy(buffer, input, len);  // Vulnerable: no bounds check\n      |     ^~~~~~\n/tmp/tmpsst9cyxy/patch.c:3:5: note: include \u2018<string.h>\u2019 or provide a declaration of \u2018memcpy\u2019\ncc1: all warnings being treated as errors",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": {
+            "causal_coverage": {
+              "success": true,
+              "details": "No causal paths in E_bug to verify",
+              "feedback": ""
+            },
+            "intervention_validity": {
+              "success": false,
+              "details": "No code changes detected in patch",
+              "feedback": "Patch claims intervention but has no code changes"
+            },
+            "logical_consistency": {
+              "success": true,
+              "details": "Patch effect analysis shows V_bug = false",
+              "feedback": ""
+            },
+            "completeness": {
+              "success": true,
+              "details": "No causal paths to verify",
+              "feedback": ""
+            },
+            "overall": false
+          },
+          "first_attempt": true
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": false,
+            "original_condition": "True",
+            "patched_condition": "False",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "reason": "Signature removed from patched code"
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmp5oguasrq/patch.c: In function \u2018process_data\u2019:\n/tmp/tmp5oguasrq/patch.c:3:24: error: comparison of integer expressions of different signedness: \u2018int\u2019 and \u2018long unsigned int\u2019 [-Werror=sign-compare]\n    3 |     if (len < 0 || len > sizeof(buffer)) {\n      |                        ^\n/tmp/tmp5oguasrq/patch.c:7:5: error: implicit declaration of function \u2018memcpy\u2019 [-Werror=implicit-function-declaration]\n    7 |     memcpy(buffer, input, (size_t)len);\n      |     ^~~~~~\n/tmp/tmp5oguasrq/patch.c:1:1: note: include \u2018<string.h>\u2019 or provide a declaration of \u2018memcpy\u2019\n  +++ |+#include <string.h>\n    1 | int process_data(char *input, int len) {\n/tmp/tmp5oguasrq/patch.c:7:5: error: incompatible implicit declaration of built-in function \u2018memcpy\u2019 [-Werror=builtin-declaration-mismatch]\n    7 |     memcpy(buffer, input, (size_t)len);\n      |     ^~~~~~\n/tmp/tmp5oguasrq/patch.c:7:5: note: include \u2018<string.h>\u2019 or provide a declaration of \u2018memcpy\u2019\n/tmp/tmp5oguasrq/patch.c:7:28: error: \u2018size_t\u2019 undeclared (first use in this function)\n    7 |     memcpy(buffer, input, (size_t)len);\n      |                            ^~~~~~\n/tmp/tmp5oguasrq/patch.c:1:1: note: \u2018size_t\u2019 is defined in header \u2018<stddef.h>\u2019; did you forget to \u2018#include <stddef.h>\u2019?\n  +++ |+#include <stddef.h>\n    1 | int process_data(char *input, int len) {\n/tmp/tmp5oguasrq/patch.c:7:28: note: each undeclared identifier is reported only once for each function it appears in\n    7 |     memcpy(buffer, input, (size_t)len);\n      |                            ^~~~~~\n/tmp/tmp5oguasrq/patch.c:7:35: error: expected \u2018)\u2019 before \u2018len\u2019\n    7 |     memcpy(buffer, input, (size_t)len);\n      |           ~                       ^~~\n      |                                   )\ncc1: all warnings being treated as errors",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": true,
+              "details": "Signature removed; assuming exploit path eliminated",
+              "feedback": ""
+            },
+            "overall": false
+          },
+          "consistency": {
+            "causal_coverage": {
+              "success": true,
+              "details": "No causal paths in E_bug to verify",
+              "feedback": ""
+            },
+            "intervention_validity": {
+              "success": true,
+              "details": "Intervention validated: found 3 relevant changes",
+              "feedback": ""
+            },
+            "logical_consistency": {
+              "success": true,
+              "details": "Patch effect analysis shows V_bug = false",
+              "feedback": ""
+            },
+            "completeness": {
+              "success": true,
+              "details": "No causal paths to verify",
+              "feedback": ""
+            },
+            "overall": true
+          },
+          "first_attempt": false
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "True",
+            "patched_condition": "V_p1 AND V_p2 AND V_p3",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 7",
+                "Registered predicate node p1 @ line 6",
+                "Static backward slice nodes: v1, p1"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :4:34: before: /"
+              ],
+              "dynamic_lines": [
+                7
+              ],
+              "symbolic_conditions": [
+                "len < 0",
+                "(size_t)len > sizeof(buffer)"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpwjw94c3l/patch.c: In function \u2018process_data\u2019:\n/tmp/tmpwjw94c3l/patch.c:6:10: error: \u2018size_t\u2019 undeclared (first use in this function)\n    6 |     if ((size_t)len > sizeof(buffer)) {\n      |          ^~~~~~\n/tmp/tmpwjw94c3l/patch.c:1:1: note: \u2018size_t\u2019 is defined in header \u2018<stddef.h>\u2019; did you forget to \u2018#include <stddef.h>\u2019?\n  +++ |+#include <stddef.h>\n    1 | int process_data(char *input, int len) {\n/tmp/tmpwjw94c3l/patch.c:6:10: note: each undeclared identifier is reported only once for each function it appears in\n    6 |     if ((size_t)len > sizeof(buffer)) {\n      |          ^~~~~~\n/tmp/tmpwjw94c3l/patch.c:6:17: error: expected \u2018)\u2019 before \u2018len\u2019\n    6 |     if ((size_t)len > sizeof(buffer)) {\n      |        ~        ^~~\n      |                 )\n/tmp/tmpwjw94c3l/patch.c:9:5: error: implicit declaration of function \u2018memcpy\u2019 [-Werror=implicit-function-declaration]\n    9 |     memcpy(buffer, input, (size_t)len);\n      |     ^~~~~~\n/tmp/tmpwjw94c3l/patch.c:1:1: note: include \u2018<string.h>\u2019 or provide a declaration of \u2018memcpy\u2019\n  +++ |+#include <string.h>\n    1 | int process_data(char *input, int len) {\n/tmp/tmpwjw94c3l/patch.c:9:5: error: incompatible implicit declaration of built-in function \u2018memcpy\u2019 [-Werror=builtin-declaration-mismatch]\n    9 |     memcpy(buffer, input, (size_t)len);\n      |     ^~~~~~\n/tmp/tmpwjw94c3l/patch.c:9:5: note: include \u2018<string.h>\u2019 or provide a declaration of \u2018memcpy\u2019\n/tmp/tmpwjw94c3l/patch.c:9:35: error: expected \u2018)\u2019 before \u2018len\u2019\n    9 |     memcpy(buffer, input, (size_t)len);\n      |           ~                       ^~~\n      |                                   )\ncc1: all warnings being treated as errors",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": true,
+              "details": "Detected 2 guard return paths",
+              "feedback": ""
+            },
+            "overall": false
+          },
+          "consistency": {
+            "causal_coverage": {
+              "success": true,
+              "details": "No causal paths in E_bug to verify",
+              "feedback": ""
+            },
+            "intervention_validity": {
+              "success": true,
+              "details": "Intervention validated: found 2 relevant changes",
+              "feedback": ""
+            },
+            "logical_consistency": {
+              "success": true,
+              "details": "Reasoning indicates vulnerability is eliminated",
+              "feedback": ""
+            },
+            "completeness": {
+              "success": true,
+              "details": "No causal paths to verify",
+              "feedback": ""
+            },
+            "overall": true
+          },
+          "first_attempt": false
+        }
+      ],
+      "explanations": {
+        "formal": "### Formal Summary\n**Structural equations**\nV_v1 := exogenous  # memcpy(buffer, input, len);  // Vulnerable: no bounds check\n\n**Original vulnerability condition**\nTrue\n\n**Post-patch condition**\nFalse\n\n**Inference**: vulnerability removed = True",
+        "natural_template": "## Vulnerability Fix Explanation\n\n### What was wrong?\n- Location: line 3\n- Issue: memcpy(buffer, input, len);  // Vulnerable: no bounds check\n\n### Root cause (from PCG)\n- no explicit predecessors (treat as exogenous)\n\n### Planned interventions\n- INSERT GUARD @ line N/A: Auto-added from feedback\n\n### Patch summary\nApplied method: ground_truth.\nGuards: None.\nNotes: None.\nDiff preview:\n--- original.c\n+++ patched.c\n-    memcpy(buffer, input, len);  // Vulnerable: no bounds check\n+    if (len > 256) {\n+        return -1;  // Error: input too large\n+    }\n+    memcpy(buffer, input, len);\n\n### Why this works\nThe patched condition eliminates the causal prerequisites\n",
+        "natural_llm": "### Vulnerability Fix Explanation\n\n1. **\ubb34\uc5c7\uc774 \ucde8\uc57d\uc810\uc744 \uc720\ubc1c\ud588\ub294\uac00 (what)**  \n   - `memcpy(buffer, input, len);` \ud638\ucd9c\uc5d0\uc11c `len` \uac12\uc5d0 \ub300\ud55c \ubc94\uc704 \uac80\uc99d\uc774 \uc5c6\uc5c8\ub2e4.  \n   - `buffer`\ub294 \uace0\uc815 \ud06c\uae30 256 \ubc14\uc774\ud2b8\uc774\uc9c0\ub9cc, `len`\uc774 256 \ubc14\uc774\ud2b8\ub97c \ucd08\uacfc\ud558\uba74 `memcpy`\uac00 \ubc84\ud37c \uacbd\uacc4\ub97c \ub118\uc5b4 \uc4f0\uae30\ub97c \uc218\ud589\ud574 **\ubc84\ud37c \uc624\ubc84\ud50c\ub85c\uc6b0**\uac00 \ubc1c\uc0dd\ud55c\ub2e4.\n\n2. **\ud328\uce58\uac00 \ucf54\ub4dc\uc5d0 \uc5b4\ub5a4 \ubcc0\ud654\ub97c \uc8fc\uc5c8\ub294\uac00 (how)**  \n   - `if (len > 256) { return -1; }` \uc870\uac74\ubb38\uc744 \ucd94\uac00\ud558\uc5ec \uc785\ub825 \uae38\uc774\uac00 \ubc84\ud37c \ud06c\uae30\ubcf4\ub2e4 \ud070 \uacbd\uc6b0 \uc870\uae30\uc5d0 \ud568\uc218 \uc2e4\ud589\uc744 \uc911\ub2e8\ud55c\ub2e4.  \n   - \uae30\uc874 `memcpy` \ud638\ucd9c\uc740 \uadf8\ub300\ub85c \uc720\uc9c0\ud558\ub418, \uc0ac\uc804 \uac80\uc99d\uc744 \ud1b5\ud574 `len`\uc774 0\u202f~\u202f256 \uc0ac\uc774\uc784\uc744 \ubcf4\uc7a5\ud55c\ub2e4.\n\n3. **\uadf8 \ubcc0\ud654\uac00 \uc65c \ucde8\uc57d\uc810\uc744 \uc81c\uac70\ud558\ub294\uac00 (why)**  \n   - \uc870\uac74\ubb38\uc740 `len`\uc774 \ubc84\ud37c \ud06c\uae30(256)\ubcf4\ub2e4 \ud074 \ub54c \ubcf5\uc0ac\ub97c \uc218\ud589\ud558\uc9c0 \uc54a\uc74c\uc73c\ub85c\uc368, `memcpy`\uac00 **\ubc84\ud37c \uacbd\uacc4\ub97c \ucd08\uacfc**\ud558\ub294 \uc0c1\ud669\uc744 \uc6d0\ucc9c \ucc28\ub2e8\ud55c\ub2e4.  \n   - \uc785\ub825\uc774 \ud5c8\uc6a9 \ubc94\uc704\ub97c \ucd08\uacfc\ud558\uba74 `-1`\uc744 \ubc18\ud658\ud574 \ud638\ucd9c\uc790\uc5d0\uac8c \uc624\ub958\ub97c \uc54c\ub9ac\ubbc0\ub85c, \uba54\ubaa8\ub9ac \uc190\uc0c1, \uc784\uc758 \ucf54\ub4dc \uc2e4\ud589, \uc11c\ube44\uc2a4 \uac70\ubd80\uc640 \uac19\uc740 \ubcf4\uc548 \uc704\ud5d8\uc774 \uc0ac\ub77c\uc9c4\ub2e4.",
+        "prompt_context": "Vulnerability summary:\n- location: line 3\n- description: memcpy(buffer, input, len);  // Vulnerable: no bounds check\n\nCausal chain (from PCG):\n- no explicit predecessors (treat as exogenous)\n\nStructural model condition:\nTrue\n\nRecommended interventions:\n- INSERT GUARD @ line N/A: Auto-added from feedback",
+        "llm_prompt": "You are a senior security engineer who produces concise, technically precise vulnerability-fix explanations.\n\nProduce a markdown section that begins with '### Vulnerability Fix Explanation' and answers:\n1. \ubb34\uc5c7\uc774 \ucde8\uc57d\uc810\uc744 \uc720\ubc1c\ud588\ub294\uc9c0 (what)\n2. \ud328\uce58\uac00 \ucf54\ub4dc\uc5d0 \uc5b4\ub5a4 \ubcc0\ud654\ub97c \uc8fc\uc5c8\ub294\uc9c0 (how)\n3. \uadf8 \ubcc0\ud654\uac00 \uc65c \ucde8\uc57d\uc810\uc744 \uc81c\uac70\ud558\ub294\uc9c0 (why)\n4. \ub2f5\ubcc0\uc740 \ud55c\uad6d\uc5b4\ub85c \uc791\uc131\ud569\ub2c8\ub2e4.\n\nYou will receive the following information:\n- \ud615\uc2dd\uc801 PCG/SCM \ubd84\uc11d \uc694\uc57d\n- \ucde8\uc57d\uc810 \uc2dc\uadf8\ub2c8\ucc98\uc640 \ud328\uce58\ub41c \ucf54\ub4dc\n\n### Provided Information\n#### Formal Context\nVulnerability summary:\n- location: line 3\n- description: memcpy(buffer, input, len);  // Vulnerable: no bounds check\n\nCausal chain (from PCG):\n- no explicit predecessors (treat as exogenous)\n\nStructural model condition:\nTrue\n\nRecommended interventions:\n- INSERT GUARD @ line N/A: Auto-added from feedback\n#### Vulnerability Signature\nbuffer overflow\n#### Patched Code\n```c\nint process_data(char *input, int len) {\n    char buffer[256];\n    if (len > 256) {\n        return -1;  // Error: input too large\n    }\n    memcpy(buffer, input, len);\n    return 0;\n}\n```\nFormal analysis currently reports the vulnerability is removed."
+      },
+      "explanation_metrics": {
+        "checklist_coverage": 0.3333333333333333,
+        "checklist_hits": {
+          "mentions_location": false,
+          "mentions_cwe": false,
+          "mentions_signature": false,
+          "describes_fix": true,
+          "describes_reason": true,
+          "mentions_causal_parent": false
+        },
+        "missing_items": [
+          "mentions_location",
+          "mentions_cwe",
+          "mentions_signature",
+          "mentions_causal_parent"
+        ],
+        "llm_scores": {
+          "accuracy": 4.7,
+          "clarity": 4.6,
+          "causality": 4.7
+        },
+        "llm_raw": "{\n  \"accuracy\": 4.7,\n  \"clarity\": 4.6,\n  \"causality\": 4.7,\n  \"reason\": \"\uc785\ub825 \uae38\uc774 \uac80\uc99d\uc744 \ucd94\uac00\ud574 \ubc84\ud37c \uc624\ubc84\ud50c\ub85c\uc6b0\ub97c \ubc29\uc9c0\ud558\ub294 \uc124\uba85\uc774 \uc815\ud655\ud558\uace0 \uba85\ud655\ud558\uac8c \uc778\uacfc \uad00\uacc4\ub97c \uc81c\uc2dc\ud568\"\n}",
+        "first_attempt_success": false
+      },
+      "consistency": {
+        "causal_coverage": {
+          "success": true,
+          "details": "No causal paths in E_bug to verify",
+          "feedback": ""
+        },
+        "intervention_validity": {
+          "success": true,
+          "details": "Intervention validated: found 2 relevant changes",
+          "feedback": ""
+        },
+        "logical_consistency": {
+          "success": true,
+          "details": "Reasoning indicates vulnerability is eliminated",
+          "feedback": ""
+        },
+        "completeness": {
+          "success": true,
+          "details": "No causal paths to verify",
+          "feedback": ""
+        },
+        "overall": true
+      },
+      "first_attempt_success": false
+    }
+  ],
+  "metrics": {
+    "total_cases": 1.0,
+    "success_rate": 1.0,
+    "expectation_match_rate": 1.0,
+    "false_positive_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "vulnerability_elimination_rate": 1.0,
+    "ground_truth_match_rate": 1.0,
+    "avg_explanation_checklist": 0.3333333333333333,
+    "first_attempt_success_rate": 0.0,
+    "consistency_pass_rate": 1.0,
+    "triple_verification_pass_rate": 1.0,
+    "avg_llm_accuracy": 4.7,
+    "avg_llm_clarity": 4.6,
+    "avg_llm_causality": 4.7
+  }
+}
