@@ -1,0 +1,1065 @@
+{
+  "cases": [
+    {
+      "case_id": "CWE-125___CVE-2024-25116.c___1-64___13.c",
+      "expected_success": true,
+      "actual_success": true,
+      "verification": {
+        "symbolic": {
+          "success": true,
+          "details": "Ground truth patch assumed to cover causal predicates",
+          "feedback": ""
+        },
+        "model_check": {
+          "success": true,
+          "details": "Ground truth patch assumed verified",
+          "feedback": ""
+        },
+        "fuzzing": {
+          "success": true,
+          "details": "Ground truth patch trusted for runtime behaviour",
+          "feedback": ""
+        },
+        "overall": true
+      },
+      "patch": {
+        "guards": [],
+        "diff": "--- original.c\n+++ patched.c\n@@ -10,14 +10,14 @@\n         return RedisModule_ReplyWithError(ctx, \"Bad capacity\");\n     }\n \n-    long long maxIterations = CF_MAX_ITERATIONS;\n+    long long maxIterations = CF_DEFAULT_MAX_ITERATIONS;\n     int mi_loc = RMUtil_ArgIndex(\"MAXITERATIONS\", argv, argc);\n     if (mi_loc != -1) {\n         if (RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK) {\n             return RedisModule_ReplyWithError(ctx, \"Couldn't parse MAXITERATIONS\");\n-        } else if (maxIterations <= 0) {\n+        } else if (maxIterations <= 0 || maxIterations > CF_MAX_ITERATIONS) {\n             return RedisModule_ReplyWithError(\n-                ctx, \"MAXITERATIONS parameter needs to be a positive integer\");\n+                ctx, \"MAXITERATIONS: value must be an integer between 1 and 65535, inclusive.\");\n         }\n     }\n \n@@ -26,9 +26,9 @@\n     if (bs_loc != -1) {\n         if (RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK) {\n             return RedisModule_ReplyWithError(ctx, \"Couldn't parse BUCKETSIZE\");\n-        } else if (bucketSize <= 0) {\n+        } else if (bucketSize <= 0 || bucketSize > CF_MAX_BUCKET_SIZE) {\n             return RedisModule_ReplyWithError(\n-                ctx, \"BUCKETSIZE parameter needs to be a positive integer\");\n+                ctx, \"BUCKETSIZE: value must be an integer between 1 and 255, inclusive.\");\n         }\n     }\n \n@@ -37,9 +37,9 @@\n     if (ex_loc != -1) {\n         if (RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK) {\n             return RedisModule_ReplyWithError(ctx, \"Couldn't parse EXPANSION\");\n-        } else if (expansion < 0) {\n+        } else if (expansion < 0 || expansion > CF_MAX_EXPANSION) {\n             return RedisModule_ReplyWithError(\n-                ctx, \"EXPANSION parameter needs to be a non-negative integer\");\n+                ctx, \"EXPANSION: value must be an integer between 0 and 32768, inclusive.\");\n         }\n     }\n ",
+        "method": "ground_truth",
+        "matches_ground_truth": true,
+        "notes": []
+      },
+      "effect": {
+        "signature_found": false,
+        "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+        "patched_condition": "False",
+        "vulnerability_removed": true,
+        "diagnostics": {
+          "reason": "Signature removed from patched code"
+        }
+      },
+      "iterations": [
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+            "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12 AND V_p13 AND V_p14",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 16",
+                "Static backward slice nodes: v1"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:50: before: *"
+              ],
+              "dynamic_lines": [
+                16
+              ],
+              "symbolic_conditions": [
+                "argc < 3 || (argc % 2) == 0",
+                "RedisModule_StringToLongLong(argv[2], &capacity) != REDISMODULE_OK || capacity <= 0",
+                "mi_loc != -1",
+                "mi_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations",
+                "bs_loc != -1",
+                "bs_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize",
+                "ex_loc != -1",
+                "ex_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion",
+                "bucketSize * 2 > capacity",
+                "status != SB_EMPTY",
+                "cf == NULL"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmphekppys4/patch.c:1:35: error: unknown type name \u2018RedisModuleCtx\u2019\n    1 | static int CFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {\n      |                                   ^~~~~~~~~~~~~~\n/tmp/tmphekppys4/patch.c:1:56: error: unknown type name \u2018RedisModuleString\u2019\n    1 | static int CFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {\n      |                                                        ^~~~~~~~~~~~~~~~~",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": true
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+            "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12 AND V_p13 AND V_p14 AND V_p15 AND V_p16 AND V_p17 AND V_p18 AND V_p19 AND V_p20 AND V_p21",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 19",
+                "Static backward slice nodes: v1"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:50: before: *"
+              ],
+              "dynamic_lines": [
+                19
+              ],
+              "symbolic_conditions": [
+                "argc < 3 || (argc % 2) == 0",
+                "RedisModule_StringToLongLong(argv[2], &capacity) != REDISMODULE_OK",
+                "capacity <= 0",
+                "maxIterations <= 0",
+                "mi_loc != -1",
+                "mi_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+                "maxIterations <= 0",
+                "bs_loc != -1",
+                "bs_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+                "bucketSize <= 0",
+                "ex_loc != -1",
+                "ex_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+                "expansion < 0",
+                "bucketSize > LLONG_MAX / 2",
+                "bucketSize * 2 > capacity",
+                "key == NULL",
+                "status != SB_EMPTY",
+                "cf == NULL"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpw9_2trrm/patch.c:1:35: error: unknown type name \u2018RedisModuleCtx\u2019\n    1 | static int CFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {\n      |                                   ^~~~~~~~~~~~~~\n/tmp/tmpw9_2trrm/patch.c:1:56: error: unknown type name \u2018RedisModuleString\u2019\n    1 | static int CFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {\n      |                                                        ^~~~~~~~~~~~~~~~~",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+            "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12 AND V_p13 AND V_p14",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 13",
+                "Static backward slice nodes: v1"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:50: before: *"
+              ],
+              "dynamic_lines": [
+                13
+              ],
+              "symbolic_conditions": [
+                "argc < 3 || (argc % 2) == 0",
+                "RedisModule_StringToLongLong(argv[2], &capacity)",
+                "mi_loc != -1",
+                "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+                "maxIterations <= 0",
+                "bs_loc != -1",
+                "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+                "bucketSize <= 0",
+                "ex_loc != -1",
+                "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+                "expansion < 0",
+                "bucketSize * 2 > capacity",
+                "status != SB_EMPTY",
+                "cf == NULL"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmp_i1g3ull/patch.c:1:35: error: unknown type name \u2018RedisModuleCtx\u2019\n    1 | static int CFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {\n      |                                   ^~~~~~~~~~~~~~\n/tmp/tmp_i1g3ull/patch.c:1:56: error: unknown type name \u2018RedisModuleString\u2019\n    1 | static int CFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {\n      |                                                        ^~~~~~~~~~~~~~~~~",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+            "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12 AND V_p13 AND V_p14 AND V_p15 AND V_p16 AND V_p17 AND V_p18 AND V_p19 AND V_p20 AND V_p21 AND V_p22 AND V_p23 AND V_p24 AND V_p25 AND V_p26 AND V_p27 AND V_p28 AND V_p29 AND V_p30 AND V_p31 AND V_p32 AND V_p33 AND V_p34 AND V_p35 AND V_p36",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 21",
+                "Static backward slice nodes: v1"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:4: before: need"
+              ],
+              "dynamic_lines": [
+                21
+              ],
+              "symbolic_conditions": [
+                "argc < 3 || (argc % 2) == 0",
+                "RedisModule_StringToLongLong(argv[2], &capacity) != REDISMODULE_OK",
+                "capacity <= 0",
+                "mi_loc != -1",
+                "mi_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+                "maxIterations <= 0",
+                "bs_loc != -1",
+                "bs_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+                "bucketSize <= 0",
+                "ex_loc != -1",
+                "ex_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+                "expansion < 0",
+                "bucketSize * 2 > capacity",
+                "status != SB_EMPTY",
+                "cf == NULL",
+                "argc < 3 || (argc % 2) == 0",
+                "RedisModule_StringToLongLong(argv[2], &capacity) != REDISMODULE_OK",
+                "capacity <= 0",
+                "mi_loc != -1",
+                "mi_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+                "maxIterations <= 0",
+                "bs_loc != -1",
+                "bs_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+                "bucketSize <= 0",
+                "ex_loc != -1",
+                "ex_loc + 1 >= argc",
+                "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+                "expansion < 0",
+                "bucketSize * 2 > capacity",
+                "status != SB_EMPTY",
+                "cf == NULL"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpqunaxqhh/patch.c:1:1: error: unknown type name \u2018We\u2019\n    1 | We need to produce final patched code. The analysis above is too long. Let's produce final code with the necessary guards.\n      | ^~\n/tmp/tmpqunaxqhh/patch.c:1:9: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018to\u2019\n    1 | We need to produce final patched code. The analysis above is too long. Let's produce final code with the necessary guards.\n      |         ^~\n/tmp/tmpqunaxqhh/patch.c:1:9: error: unknown type name \u2018to\u2019\n/tmp/tmpqunaxqhh/patch.c:1:75: error: missing terminating ' character [-Werror]\n    1 | We need to produce final patched code. The analysis above is too long. Let's produce final code with the necessary guards.\n      |                                                                           ^\n/tmp/tmpqunaxqhh/patch.c:1:75: error: missing terminating ' character\n    1 | We need to produce final patched code. The analysis above is too long. Let's produce final code with the necessary guards.\n      |                                                                           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n/tmp/tmpqunaxqhh/patch.c:3:3: error: missing terminating ' character [-Werror]\n    3 | We'll rewrite the function:\n      |   ^\n/tmp/tmpqunaxqhh/patch.c:3:3: error: missing terminating ' character\n    3 | We'll rewrite the function:\n      |   ^~~~~~~~~~~~~~~~~~~~~~~~~\n/tmp/tmpqunaxqhh/patch.c:5:1: error: stray \u2018`\u2019 in program\n    5 | ```\n      | ^\n/tmp/tmpqunaxqhh/patch.c:5:2: error: stray \u2018`\u2019 in program\n    5 | ```\n      |  ^\n/tmp/tmpqunaxqhh/patch.c:5:3: error: stray \u2018`\u2019 in program\n    5 | ```\n      |   ^\n/tmp/tmpqunaxqhh/patch.c:81:1: error: stray \u2018`\u2019 in program\n   81 | ```\n      | ^\n/tmp/tmpqunaxqhh/patch.c:81:2: error: stray \u2018`\u2019 in program\n   81 | ```\n      |  ^\n/tmp/tmpqunaxqhh/patch.c:81:3: error: stray \u2018`\u2019 in program\n   81 | ```\n      |   ^\n/tmp/tmpqunaxqhh/patch.c:83:1: error: unknown type name \u2018We\u2019\n   83 | We added checks for missing values and capacity > 0. That should satisfy interventions. Let's output that.```c\n      | ^~\n/tmp/tmpqunaxqhh/patch.c:83:10: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018checks\u2019\n   83 | We added checks for missing values and capacity > 0. That should satisfy interventions. Let's output that.```c\n      |          ^~~~~~\n/tmp/tmpqunaxqhh/patch.c:83:92: error: missing terminating ' character [-Werror]\n   83 | We added checks for missing values and capacity > 0. That should satisfy interventions. Let's output that.```c\n      |                                                                                            ^\n/tmp/tmpqunaxqhh/patch.c:83:92: error: missing terminating ' character\n   83 | We added checks for missing values and capacity > 0. That should satisfy interventions. Let's output that.```c\n      |                                                                                            ^~~~~~~~~~~~~~~~~~~\n/tmp/tmpqunaxqhh/patch.c:166:1: error: stray \u2018`\u2019 in program\n  166 | ```\n      | ^\n/tmp/tmpqunaxqhh/patch.c:166:2: error: stray \u2018`\u2019 in program\n  166 | ```\n      |  ^\n/tmp/tmpqunaxqhh/patch.c:166:3: error: stray \u2018`\u2019 in program\n  166 | ```\n      |   ^\ncc1: all warnings being treated as errors",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+            "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12 AND V_p13 AND V_p14 AND V_p15",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 16",
+                "Static backward slice nodes: v1"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:50: before: *"
+              ],
+              "dynamic_lines": [
+                16
+              ],
+              "symbolic_conditions": [
+                "argc < 3 || (argc % 2) == 0",
+                "RedisModule_StringToLongLong(argv[2], &capacity) != REDISMODULE_OK",
+                "capacity <= 0",
+                "maxIterations <= 0",
+                "mi_loc != -1",
+                "RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK",
+                "bucketSize <= 0",
+                "bs_loc != -1",
+                "RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK",
+                "expansion < 0",
+                "ex_loc != -1",
+                "RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK",
+                "bucketSize * 2 > capacity",
+                "status != SB_EMPTY",
+                "cf == NULL"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpax1k4jjg/patch.c:1:35: error: unknown type name \u2018RedisModuleCtx\u2019\n    1 | static int CFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {\n      |                                   ^~~~~~~~~~~~~~\n/tmp/tmpax1k4jjg/patch.c:1:56: error: unknown type name \u2018RedisModuleString\u2019\n    1 | static int CFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {\n      |                                                        ^~~~~~~~~~~~~~~~~",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        }
+      ],
+      "explanations": {
+        "formal": "### Formal Summary\n**Structural equations**\nV_v1 := V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11  # long long maxIterations = CF_MAX_ITERATIONS;\nV_p1 := exogenous  # argc < 3 || (argc % 2) == 0\nV_p2 := exogenous  # RedisModule_StringToLongLong(argv[2], &capacity)\nV_p3 := exogenous  # mi_loc != -1\nV_p4 := exogenous  # RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK\nV_p5 := exogenous  # bs_loc != -1\nV_p6 := exogenous  # RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK\nV_p7 := exogenous  # ex_loc != -1\nV_p8 := exogenous  # RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK\nV_p9 := exogenous  # bucketSize * 2 > capacity\nV_p10 := exogenous  # status != SB_EMPTY\nV_p11 := exogenous  # cf == NULL\n\n**Original vulnerability condition**\nV_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11\n\n**Post-patch condition**\nFalse\n\n**Inference**: vulnerability removed = True",
+        "natural_template": "## Vulnerability Fix Explanation\n\n### What was wrong?\n- Location: line 13\n- Issue: long long maxIterations = CF_MAX_ITERATIONS;\n\n### Root cause (from PCG)\n- argc < 3 || (argc % 2) == 0 (line 4)\n- RedisModule_StringToLongLong(argv[2], &capacity) (line 9)\n- mi_loc != -1 (line 15)\n- RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK (line 16)\n- bs_loc != -1 (line 26)\n- RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK (line 27)\n- ex_loc != -1 (line 37)\n- RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK (line 38)\n- bucketSize * 2 > capacity (line 46)\n- status != SB_EMPTY (line 53)\n- cf == NULL (line 58)\n\n### Planned interventions\n- ENFORCE NOT V_p1 @ line 4: Prevent argc < 3 || (argc % 2) == 0 from triggering vulnerability\n- ENFORCE NOT V_p2 @ line 9: Prevent RedisModule_StringToLongLong(argv[2], &capacity) from triggering vulnerability\n- ENFORCE NOT V_p3 @ line 15: Prevent mi_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p4 @ line 16: Prevent RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p5 @ line 26: Prevent bs_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p6 @ line 27: Prevent RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p7 @ line 37: Prevent ex_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p8 @ line 38: Prevent RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p9 @ line 46: Prevent bucketSize * 2 > capacity from triggering vulnerability\n- ENFORCE NOT V_p10 @ line 53: Prevent status != SB_EMPTY from triggering vulnerability\n- ENFORCE NOT V_p11 @ line 58: Prevent cf == NULL from triggering vulnerability\n- INSERT GUARD @ line N/A: Auto-added from feedback\n\n### Patch summary\nApplied method: ground_truth.\nGuards: None.\nNotes: None.\nDiff preview:\n--- original.c\n+++ patched.c\n-    long long maxIterations = CF_MAX_ITERATIONS;\n+    long long maxIterations = CF_DEFAULT_MAX_ITERATIONS;\n-        } else if (maxIterations <= 0) {\n+        } else if (maxIterations <= 0 || maxIterations > CF_MAX_ITERATIONS) {\n-                ctx, \"MAXITERATIONS parameter needs to be a positive integer\");\n+                ctx, \"MAXITERATIONS: value must be an integer between 1 and 65535, inclusive.\");\n\n### Why this works\nThe patched condition eliminates the causal prerequisites\n",
+        "natural_llm": "### Vulnerability Fix Explanation\n\n1. **\ubb34\uc5c7\uc774 \ucde8\uc57d\uc810\uc744 \uc720\ubc1c\ud588\ub294\uc9c0 (what)**  \n   - `long long maxIterations = CF_MAX_ITERATIONS;` \ub85c \uc778\ud574 **\ucd5c\ub300 \ubc18\ubcf5 \ud69f\uc218**\uac00 \ucef4\ud30c\uc77c \uc2dc\uc810\uc5d0 \uace0\uc815\ub418\uc5b4, \uc0ac\uc6a9\uc790\uac00 \uba85\uc2dc\uc801\uc73c\ub85c \uac12\uc744 \uc9c0\uc815\ud558\uc9c0 \uc54a\uc73c\uba74 \ud56d\uc0c1 `CF_MAX_ITERATIONS`(65535)\ub97c \uc0ac\uc6a9\ud558\uac8c \ub429\ub2c8\ub2e4.  \n   - \uc774 \uac12\uc774 \ub108\ubb34 \ud06c\uba74 \ub0b4\ubd80 \ud574\uc2dc \ud14c\uc774\ube14 \uc7ac\ubc30\uce58 \uc2dc \ubc18\ubcf5\uc774 \uacfc\ub3c4\ud558\uac8c \ubc1c\uc0dd\ud574 **\uc11c\ube44\uc2a4 \uac70\ubd80(DoS)** \ub610\ub294 **\uba54\ubaa8\ub9ac \uc624\ubc84\ud50c\ub85c\uc6b0** \uc704\ud5d8\uc774 \uc874\uc7ac\ud588\uc2b5\ub2c8\ub2e4.\n\n2. **\ud328\uce58\uac00 \ucf54\ub4dc\uc5d0 \uc5b4\ub5a4 \ubcc0\ud654\ub97c \uc8fc\uc5c8\ub294\uc9c0 (how)**  \n   - `maxIterations`\ub97c `CF_DEFAULT_MAX_ITERATIONS`(\uae30\ubcf8\uac12)\uc73c\ub85c \ucd08\uae30\ud654\ud558\uace0,  \n   - `MAXITERATIONS` \uc635\uc158\uc774 \uc81c\uacf5\ub418\uba74 `RedisModule_StringToLongLong` \uc73c\ub85c \ud30c\uc2f1 \ud6c4  \n     - `maxIterations <= 0` \ub610\ub294 `maxIterations > CF_MAX_ITERATIONS` \ub97c \uac80\uc0ac\ud574 \ubc94\uc704 \ucd08\uacfc\ub97c \ubc29\uc9c0\ud569\ub2c8\ub2e4.  \n   - \ud30c\uc2f1 \uc2e4\ud328 \uc2dc \uba85\ud655\ud55c \uc624\ub958 \uba54\uc2dc\uc9c0\ub97c \ubc18\ud658\ud558\ub3c4\ub85d \ud588\uc2b5\ub2c8\ub2e4.  \n   - `bucketSize`, `expansion` \ub4f1 \ub2e4\ub978 \ud30c\ub77c\ubbf8\ud130\uc5d0 \ub300\ud574\uc11c\ub3c4 \uc720\uc0ac\ud55c \ubc94\uc704 \uac80\uc0ac\ub97c \ucd94\uac00\ud588\uc2b5\ub2c8\ub2e4.\n\n3. **\uadf8 \ubcc0\ud654\uac00 \uc65c \ucde8\uc57d\uc810\uc744 \uc81c\uac70\ud558\ub294\uc9c0 (why)**  \n   - **\uc785\ub825 \uac80\uc99d**\uc744 \ud1b5\ud574 `maxIterations`\uac00 1~65535 \uc0ac\uc774\uc5d0 \uc788\ub294\uc9c0 \ud655\uc778\ud568\uc73c\ub85c\uc368,  \n     - \uacfc\ub3c4\ud55c \ubc18\ubcf5\uc73c\ub85c \uc778\ud55c CPU \uacfc\ubd80\ud558\uc640 \uba54\ubaa8\ub9ac \ud560\ub2f9 \uc2e4\ud328\ub97c \ubc29\uc9c0\ud569\ub2c8\ub2e4.  \n   - \ud30c\uc2f1 \uc2e4\ud328 \uc2dc \uc989\uc2dc \uc624\ub958\ub97c \ubc18\ud658\ud574 \uc798\ubabb\ub41c \uc778\uc790\ub97c \ub0b4\ubd80 \ub85c\uc9c1\uc5d0 \uc804\ub2ec\ud558\uc9c0 \uc54a\ub3c4\ub85d \ud558\uc5ec **\uc815\uc0c1 \ub3d9\uc791 \ubcf4\uc7a5**\ud569\ub2c8\ub2e4.  \n   - \ub2e4\ub978 \ud30c\ub77c\ubbf8\ud130\uc5d0 \ub300\ud55c \uac80\uc99d\uc744 \ucd94\uac00\ud568\uc73c\ub85c\uc368 \uc804\uccb4 \ud30c\ub77c\ubbf8\ud130 \uc870\ud569\uc774 \uc720\ud6a8\ud55c \ubc94\uc704 \ub0b4\uc5d0 \uc788\ub3c4\ub85d \ubcf4\uc7a5, \uacb0\uacfc\uc801\uc73c\ub85c **DoS** \ubc0f **\uc624\ubc84\ud50c\ub85c\uc6b0** \uc704\ud5d8\uc744 \uc81c\uac70\ud569\ub2c8\ub2e4.\n\n4. **\ub2f5\ubcc0\uc740 \ud55c\uad6d\uc5b4\ub85c \uc791\uc131\ud569\ub2c8\ub2e4.**  \n   - \uc704 \ub0b4\uc6a9\uc740 \ubaa8\ub450 \ud55c\uad6d\uc5b4\ub85c \uc791\uc131\ub418\uc5c8\uc2b5\ub2c8\ub2e4.",
+        "prompt_context": "Vulnerability summary:\n- location: line 13\n- description: long long maxIterations = CF_MAX_ITERATIONS;\n\nCausal chain (from PCG):\n- argc < 3 || (argc % 2) == 0 (line 4)\n- RedisModule_StringToLongLong(argv[2], &capacity) (line 9)\n- mi_loc != -1 (line 15)\n- RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK (line 16)\n- bs_loc != -1 (line 26)\n- RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK (line 27)\n- ex_loc != -1 (line 37)\n- RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK (line 38)\n- bucketSize * 2 > capacity (line 46)\n- status != SB_EMPTY (line 53)\n- cf == NULL (line 58)\n\nStructural model condition:\nV_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11\n\nRecommended interventions:\n- ENFORCE NOT V_p1 @ line 4: Prevent argc < 3 || (argc % 2) == 0 from triggering vulnerability\n- ENFORCE NOT V_p2 @ line 9: Prevent RedisModule_StringToLongLong(argv[2], &capacity) from triggering vulnerability\n- ENFORCE NOT V_p3 @ line 15: Prevent mi_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p4 @ line 16: Prevent RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p5 @ line 26: Prevent bs_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p6 @ line 27: Prevent RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p7 @ line 37: Prevent ex_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p8 @ line 38: Prevent RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p9 @ line 46: Prevent bucketSize * 2 > capacity from triggering vulnerability\n- ENFORCE NOT V_p10 @ line 53: Prevent status != SB_EMPTY from triggering vulnerability\n- ENFORCE NOT V_p11 @ line 58: Prevent cf == NULL from triggering vulnerability\n- INSERT GUARD @ line N/A: Auto-added from feedback",
+        "llm_prompt": "You are a senior security engineer who produces concise, technically precise vulnerability-fix explanations.\n\nProduce a markdown section that begins with '### Vulnerability Fix Explanation' and answers:\n1. \ubb34\uc5c7\uc774 \ucde8\uc57d\uc810\uc744 \uc720\ubc1c\ud588\ub294\uc9c0 (what)\n2. \ud328\uce58\uac00 \ucf54\ub4dc\uc5d0 \uc5b4\ub5a4 \ubcc0\ud654\ub97c \uc8fc\uc5c8\ub294\uc9c0 (how)\n3. \uadf8 \ubcc0\ud654\uac00 \uc65c \ucde8\uc57d\uc810\uc744 \uc81c\uac70\ud558\ub294\uc9c0 (why)\n4. \ub2f5\ubcc0\uc740 \ud55c\uad6d\uc5b4\ub85c \uc791\uc131\ud569\ub2c8\ub2e4.\n\nYou will receive the following information:\n- \ud615\uc2dd\uc801 PCG/SCM \ubd84\uc11d \uc694\uc57d\n- \ucde8\uc57d\uc810 \uc2dc\uadf8\ub2c8\ucc98\uc640 \ud328\uce58\ub41c \ucf54\ub4dc\n\n### Provided Information\n#### Formal Context\nVulnerability summary:\n- location: line 13\n- description: long long maxIterations = CF_MAX_ITERATIONS;\n\nCausal chain (from PCG):\n- argc < 3 || (argc % 2) == 0 (line 4)\n- RedisModule_StringToLongLong(argv[2], &capacity) (line 9)\n- mi_loc != -1 (line 15)\n- RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK (line 16)\n- bs_loc != -1 (line 26)\n- RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK (line 27)\n- ex_loc != -1 (line 37)\n- RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK (line 38)\n- bucketSize * 2 > capacity (line 46)\n- status != SB_EMPTY (line 53)\n- cf == NULL (line 58)\n\nStructural model condition:\nV_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11\n\nRecommended interventions:\n- ENFORCE NOT V_p1 @ line 4: Prevent argc < 3 || (argc % 2) == 0 from triggering vulnerability\n- ENFORCE NOT V_p2 @ line 9: Prevent RedisModule_StringToLongLong(argv[2], &capacity) from triggering vulnerability\n- ENFORCE NOT V_p3 @ line 15: Prevent mi_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p4 @ line 16: Prevent RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p5 @ line 26: Prevent bs_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p6 @ line 27: Prevent RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p7 @ line 37: Prevent ex_loc != -1 from triggering vulnerability\n- ENFORCE NOT V_p8 @ line 38: Prevent RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK from triggering vulnerability\n- ENFORCE NOT V_p9 @ line 46: Prevent bucketSize * 2 > capacity from triggering vulnerability\n- ENFORCE NOT V_p10 @ line 53: Prevent status != SB_EMPTY from triggering vulnerability\n- ENFORCE NOT V_p11 @ line 58: Prevent cf == NULL from triggering vulnerability\n- INSERT GUARD @ line N/A: Auto-added from feedback\n#### Vulnerability Signature\nlong long maxIterations = CF_MAX_ITERATIONS;\n#### Patched Code\n```c\nstatic int CFReserve_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {\n    RedisModule_AutoMemory(ctx);\n\n    if (argc < 3 || (argc % 2) == 0) {\n        return RedisModule_WrongArity(ctx);\n    }\n\n    long long capacity;\n    if (RedisModule_StringToLongLong(argv[2], &capacity)) {\n        return RedisModule_ReplyWithError(ctx, \"Bad capacity\");\n    }\n\n    long long maxIterations = CF_DEFAULT_MAX_ITERATIONS;\n    int mi_loc = RMUtil_ArgIndex(\"MAXITERATIONS\", argv, argc);\n    if (mi_loc != -1) {\n        if (RedisModule_StringToLongLong(argv[mi_loc + 1], &maxIterations) != REDISMODULE_OK) {\n            return RedisModule_ReplyWithError(ctx, \"Couldn't parse MAXITERATIONS\");\n        } else if (maxIterations <= 0 || maxIterations > CF_MAX_ITERATIONS) {\n            return RedisModule_ReplyWithError(\n                ctx, \"MAXITERATIONS: value must be an integer between 1 and 65535, inclusive.\");\n        }\n    }\n\n    long long bucketSize = CF_DEFAULT_BUCKETSIZE;\n    int bs_loc = RMUtil_ArgIndex(\"BUCKETSIZE\", argv, argc);\n    if (bs_loc != -1) {\n        if (RedisModule_StringToLongLong(argv[bs_loc + 1], &bucketSize) != REDISMODULE_OK) {\n            return RedisModule_ReplyWithError(ctx, \"Couldn't parse BUCKETSIZE\");\n        } else if (bucketSize <= 0 || bucketSize > CF_MAX_BUCKET_SIZE) {\n            return RedisModule_ReplyWithError(\n                ctx, \"BUCKETSIZE: value must be an integer between 1 and 255, inclusive.\");\n        }\n    }\n\n    long long expansion = CF_DEFAULT_EXPANSION;\n    int ex_loc = RMUtil_ArgIndex(\"EXPANSION\", argv, argc);\n    if (ex_loc != -1) {\n        if (RedisModule_StringToLongLong(argv[ex_loc + 1], &expansion) != REDISMODULE_OK) {\n            return RedisModule_ReplyWithError(ctx, \"Couldn't parse EXPANSION\");\n        } else if (expansion < 0 || expansion > CF_MAX_EXPANSION) {\n            return RedisModule_ReplyWithError(\n                ctx, \"EXPANSION: value must be an integer between 0 and 32768, inclusive.\");\n        }\n    }\n\n    if (bucketSize * 2 > capacity) {\n        return RedisModule_ReplyWithError(ctx, \"Capacity must be at least (BucketSize * 2)\");\n    }\n\n    CuckooFilter *cf;\n    RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);\n    int status = cfGetFilter(key, &cf);\n    if (status != SB_EMPTY) {\n        return RedisModule_ReplyWithError(ctx, statusStrerror(status));\n    }\n\n    cf = cfCreate(key, capacity, bucketSize, maxIterations, expansion);\n    if (cf == NULL) {\n        return RedisModule_ReplyWithError(ctx, \"Couldn't create Cuckoo Filter\"); // LCOV_EXCL_LINE\n    } else {\n        RedisModule_ReplicateVerbatim(ctx);\n        return RedisModule_ReplyWithSimpleString(ctx, \"OK\");\n    }\n}\n```\nFormal analysis currently reports the vulnerability is removed."
+      },
+      "explanation_metrics": {
+        "checklist_coverage": 0.5,
+        "checklist_hits": {
+          "mentions_location": false,
+          "mentions_cwe": false,
+          "mentions_signature": true,
+          "describes_fix": true,
+          "describes_reason": true,
+          "mentions_causal_parent": false
+        },
+        "missing_items": [
+          "mentions_location",
+          "mentions_cwe",
+          "mentions_causal_parent"
+        ],
+        "llm_scores": {
+          "accuracy": 2.0,
+          "clarity": 4.0,
+          "causality": 3.5
+        },
+        "llm_raw": "{\"accuracy\": 2.0, \"clarity\": 4.0, \"causality\": 3.5, \"reason\": \"\uc124\uba85\uc740 \uba85\ud655\ud558\uc9c0\ub9cc, \uc2e4\uc81c CWE-125(\ubc84\ud37c \uc624\ubc84\ub9ac\ub4dc)\uc640 \ub9de\uc9c0 \uc54a\uc544 \uc815\ud655\ub3c4\uac00 \ub0ae\uc74c.\"}",
+        "first_attempt_success": false
+      },
+      "first_attempt_success": false
+    },
+    {
+      "case_id": "CWE-125___CVE-2024-29489.c___1-59___5.c",
+      "expected_success": true,
+      "actual_success": true,
+      "verification": {
+        "symbolic": {
+          "success": true,
+          "details": "Ground truth patch assumed to cover causal predicates",
+          "feedback": ""
+        },
+        "model_check": {
+          "success": true,
+          "details": "Ground truth patch assumed verified",
+          "feedback": ""
+        },
+        "fuzzing": {
+          "success": true,
+          "details": "Ground truth patch trusted for runtime behaviour",
+          "feedback": ""
+        },
+        "overall": true
+      },
+      "patch": {
+        "guards": [],
+        "diff": "--- original.c\n+++ patched.c\n@@ -3,6 +3,8 @@\n                                    ecma_object_t *scope_p, /**< lexical environment to use */\n                                    ecma_value_t this_binding) /**< value of 'ThisBinding' */\n {\n+  ECMA_CHECK_STACK_USAGE ();\n+\n   shared_args_p->header.status_flags |= VM_FRAME_CTX_SHARED_NON_ARROW_FUNC;\n \n   ecma_value_t ret_value;",
+        "method": "ground_truth",
+        "matches_ground_truth": true,
+        "notes": []
+      },
+      "effect": {
+        "signature_found": true,
+        "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6",
+        "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6",
+        "vulnerability_removed": false,
+        "diagnostics": {
+          "static_trace": [
+            "Registered vulnerability node v1 @ line 5",
+            "Static backward slice nodes: v1"
+          ],
+          "ast_trace": [
+            "pycparser parse failure: :1:21: before: JERRY_ATTR_NOINLINE"
+          ],
+          "dynamic_lines": [
+            5
+          ],
+          "symbolic_conditions": [
+            "JERRY_CONTEXT (current_new_target_p) == NULL",
+            "ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp)",
+            "JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED)",
+            "!ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value)",
+            "!ecma_is_value_undefined (ret_value)",
+            "JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV)"
+          ],
+          "clang_nodes": [],
+          "angr_paths": []
+        }
+      },
+      "iterations": [
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6",
+            "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6",
+            "vulnerability_removed": false,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 5",
+                "Static backward slice nodes: v1"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:21: before: JERRY_ATTR_NOINLINE"
+              ],
+              "dynamic_lines": [
+                5
+              ],
+              "symbolic_conditions": [
+                "JERRY_CONTEXT (current_new_target_p) == NULL",
+                "ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp)",
+                "JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED)",
+                "!ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value)",
+                "!ecma_is_value_undefined (ret_value)",
+                "JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV)"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmp3ahhg48f/patch.c:1:8: error: unknown type name \u2018ecma_value_t\u2019\n    1 | static ecma_value_t JERRY_ATTR_NOINLINE\n      |        ^~~~~~~~~~~~\n/tmp/tmp3ahhg48f/patch.c:2:1: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018ecma_op_function_call_constructor\u2019\n    2 | ecma_op_function_call_constructor (vm_frame_ctx_shared_args_t *shared_args_p,\n      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": true
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6",
+            "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6",
+            "vulnerability_removed": false,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 5",
+                "Static backward slice nodes: v1"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:21: before: JERRY_ATTR_NOINLINE"
+              ],
+              "dynamic_lines": [
+                5
+              ],
+              "symbolic_conditions": [
+                "JERRY_CONTEXT (current_new_target_p) == NULL",
+                "ext_func_p->u.function.scope_cp != NULL &",
+                "this_binding == ECMA_VALUE_UNINITIALIZED",
+                "!ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value)",
+                "!ecma_is_value_undefined (ret_value)",
+                "shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmppo56zww7/patch.c:1:8: error: unknown type name \u2018ecma_value_t\u2019\n    1 | static ecma_value_t JERRY_ATTR_NOINLINE\n      |        ^~~~~~~~~~~~\n/tmp/tmppo56zww7/patch.c:2:1: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018ecma_op_function_call_constructor\u2019\n    2 | ecma_op_function_call_constructor (vm_frame_ctx_shared_args_t *shared_args_p,\n      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6",
+            "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 5",
+                "Static backward slice nodes: v1"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:21: before: JERRY_ATTR_NOINLINE"
+              ],
+              "dynamic_lines": [
+                5
+              ],
+              "symbolic_conditions": [
+                "shared_args_p == NULL",
+                "JERRY_CONTEXT (current_new_target_p) == NULL",
+                "shared_args_p->header.function_object_p == NULL",
+                "ext_func_p == NULL || ext_func_p->u.function.scope_cp == NULL",
+                "ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp)",
+                "this_binding == ECMA_VALUE_UNINITIALIZED",
+                "ECMA_IS_VALUE_ERROR (ret_value)",
+                "JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED)",
+                "!ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value)",
+                "!ecma_is_value_undefined (ret_value)",
+                "JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV)"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmp006dzbdt/patch.c:1:8: error: unknown type name \u2018ecma_value_t\u2019\n    1 | static ecma_value_t JERRY_ATTR_NOINLINE\n      |        ^~~~~~~~~~~~\n/tmp/tmp006dzbdt/patch.c:2:1: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018ecma_op_function_call_constructor\u2019\n    2 | ecma_op_function_call_constructor (vm_frame_ctx_shared_args_t *shared_args_p,\n      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        },
+        {
+          "patch_method": "heuristic_guard",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6",
+            "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12 AND V_p13",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 5",
+                "Static backward slice nodes: v1"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:21: before: JERRY_ATTR_NOINLINE"
+              ],
+              "dynamic_lines": [
+                5
+              ],
+              "symbolic_conditions": [
+                "JERRY_CONTEXT (current_new_target_p) == NULL",
+                "ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp)",
+                "JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED)",
+                "!ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value)",
+                "!ecma_is_value_undefined (ret_value)",
+                "JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV)",
+                "!input",
+                "JERRY_CONTEXT (current_new_target_p) == NULL",
+                "ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp)",
+                "JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED)",
+                "!ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value)",
+                "!ecma_is_value_undefined (ret_value)",
+                "JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV)"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpyl0_owwj/patch.c:1:8: error: unknown type name \u2018ecma_value_t\u2019\n    1 | static ecma_value_t JERRY_ATTR_NOINLINE\n      |        ^~~~~~~~~~~~\n/tmp/tmpyl0_owwj/patch.c:2:1: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018ecma_op_function_call_constructor\u2019\n    2 | ecma_op_function_call_constructor (vm_frame_ctx_shared_args_t *shared_args_p, /**< shared data */\n      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n/tmp/tmpyl0_owwj/patch.c:7:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n    7 |     }}\n      |      ^\n/tmp/tmpyl0_owwj/patch.c:8:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n    8 | if (ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp)) {\n      | ^~\n/tmp/tmpyl0_owwj/patch.c:10:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n   10 |     }}\n      |      ^\n/tmp/tmpyl0_owwj/patch.c:11:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n   11 | if (JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED)) {\n      | ^~\n/tmp/tmpyl0_owwj/patch.c:13:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n   13 |     }}\n      |      ^\n/tmp/tmpyl0_owwj/patch.c:14:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n   14 | if (!ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value)) {\n      | ^~\n/tmp/tmpyl0_owwj/patch.c:16:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n   16 |     }}\n      |      ^\n/tmp/tmpyl0_owwj/patch.c:17:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n   17 | if (!ecma_is_value_undefined (ret_value)) {\n      | ^~\n/tmp/tmpyl0_owwj/patch.c:19:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n   19 |     }}\n      |      ^\n/tmp/tmpyl0_owwj/patch.c:20:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n   20 | if (JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV)) {\n      | ^~\n/tmp/tmpyl0_owwj/patch.c:22:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n   22 |     }}\n      |      ^\n/tmp/tmpyl0_owwj/patch.c:23:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n   23 | if (!input) {\n      | ^~\n/tmp/tmpyl0_owwj/patch.c:26:1: error: expected identifier or \u2018(\u2019 before \u2018{\u2019 token\n   26 | {\n      | ^",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": true,
+              "details": "Detected 7 guard return paths",
+              "feedback": ""
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        },
+        {
+          "patch_method": "heuristic_guard",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6",
+            "patched_condition": "V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6 AND V_p7 AND V_p8 AND V_p9 AND V_p10 AND V_p11 AND V_p12 AND V_p13",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 5",
+                "Static backward slice nodes: v1"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:21: before: JERRY_ATTR_NOINLINE"
+              ],
+              "dynamic_lines": [
+                5
+              ],
+              "symbolic_conditions": [
+                "JERRY_CONTEXT (current_new_target_p) == NULL",
+                "ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp)",
+                "JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED)",
+                "!ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value)",
+                "!ecma_is_value_undefined (ret_value)",
+                "JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV)",
+                "!input",
+                "JERRY_CONTEXT (current_new_target_p) == NULL",
+                "ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp)",
+                "JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED)",
+                "!ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value)",
+                "!ecma_is_value_undefined (ret_value)",
+                "JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV)"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpn4zipro5/patch.c:1:8: error: unknown type name \u2018ecma_value_t\u2019\n    1 | static ecma_value_t JERRY_ATTR_NOINLINE\n      |        ^~~~~~~~~~~~\n/tmp/tmpn4zipro5/patch.c:2:1: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018ecma_op_function_call_constructor\u2019\n    2 | ecma_op_function_call_constructor (vm_frame_ctx_shared_args_t *shared_args_p, /**< shared data */\n      | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n/tmp/tmpn4zipro5/patch.c:7:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n    7 |     }}\n      |      ^\n/tmp/tmpn4zipro5/patch.c:8:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n    8 | if (ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp)) {\n      | ^~\n/tmp/tmpn4zipro5/patch.c:10:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n   10 |     }}\n      |      ^\n/tmp/tmpn4zipro5/patch.c:11:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n   11 | if (JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED)) {\n      | ^~\n/tmp/tmpn4zipro5/patch.c:13:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n   13 |     }}\n      |      ^\n/tmp/tmpn4zipro5/patch.c:14:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n   14 | if (!ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value)) {\n      | ^~\n/tmp/tmpn4zipro5/patch.c:16:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n   16 |     }}\n      |      ^\n/tmp/tmpn4zipro5/patch.c:17:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n   17 | if (!ecma_is_value_undefined (ret_value)) {\n      | ^~\n/tmp/tmpn4zipro5/patch.c:19:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n   19 |     }}\n      |      ^\n/tmp/tmpn4zipro5/patch.c:20:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n   20 | if (JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV)) {\n      | ^~\n/tmp/tmpn4zipro5/patch.c:22:6: error: expected identifier or \u2018(\u2019 before \u2018}\u2019 token\n   22 |     }}\n      |      ^\n/tmp/tmpn4zipro5/patch.c:23:1: error: expected identifier or \u2018(\u2019 before \u2018if\u2019\n   23 | if (!input) {\n      | ^~\n/tmp/tmpn4zipro5/patch.c:26:1: error: expected identifier or \u2018(\u2019 before \u2018{\u2019 token\n   26 | {\n      | ^",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": true,
+              "details": "Detected 7 guard return paths",
+              "feedback": ""
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        }
+      ],
+      "explanations": {
+        "formal": "### Formal Summary\n**Structural equations**\nV_v1 := V_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6  # {\nV_p1 := exogenous  # JERRY_CONTEXT (current_new_target_p) == NULL\nV_p2 := exogenous  # ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp)\nV_p3 := exogenous  # JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED)\nV_p4 := exogenous  # !ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value)\nV_p5 := exogenous  # !ecma_is_value_undefined (ret_value)\nV_p6 := exogenous  # JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV)\n\n**Original vulnerability condition**\nV_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6\n\n**Post-patch condition**\nV_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6\n\n**Inference**: vulnerability removed = False",
+        "natural_template": "## Vulnerability Fix Explanation\n\n### What was wrong?\n- Location: line 5\n- Issue: {\n\n### Root cause (from PCG)\n- JERRY_CONTEXT (current_new_target_p) == NULL (line 10)\n- ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp) (line 17)\n- JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED) (line 36)\n- !ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value) (line 38)\n- !ecma_is_value_undefined (ret_value) (line 40)\n- JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV) (line 53)\n\n### Planned interventions\n- ENFORCE NOT V_p1 @ line 10: Prevent JERRY_CONTEXT (current_new_target_p) == NULL from triggering vulnerability\n- ENFORCE NOT V_p2 @ line 17: Prevent ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp) from triggering vulnerability\n- ENFORCE NOT V_p3 @ line 36: Prevent JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED) from triggering vulnerability\n- ENFORCE NOT V_p4 @ line 38: Prevent !ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value) from triggering vulnerability\n- ENFORCE NOT V_p5 @ line 40: Prevent !ecma_is_value_undefined (ret_value) from triggering vulnerability\n- ENFORCE NOT V_p6 @ line 53: Prevent JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV) from triggering vulnerability\n- INSERT GUARD @ line N/A: Auto-added from feedback\n\n### Patch summary\nApplied method: ground_truth.\nGuards: None.\nNotes: None.\nDiff preview:\n--- original.c\n+++ patched.c\n+  ECMA_CHECK_STACK_USAGE ();\n+\n\n### Why this works\nFormal analysis could not confirm removal of the causal prerequisites\n",
+        "natural_llm": "### Vulnerability Fix Explanation\n\n1. **\ubb34\uc5c7\uc774 \ucde8\uc57d\uc810\uc744 \uc720\ubc1c\ud588\ub294\uac00 (what)**  \n   - `ecma_op_function_call_constructor` \ud568\uc218\uc5d0\uc11c `this_binding` \uc774 **\ucd08\uae30\ud654\ub418\uc9c0 \uc54a\uc740** \uc0c1\ud0dc(`ECMA_VALUE_UNINITIALIZED`)\uc77c \ub54c, \ubc18\ud658\uac12(`ret_value`)\uc774 **\uc624\ub958, \uac1d\uccb4, undefined**\uac00 \uc544\ub2cc \uacbd\uc6b0\uc5d0 \ub300\ud574 **\uc608\uc678\ub97c \ubc1c\uc0dd\uc2dc\ud0a4\uc9c0 \uc54a\uace0** \uadf8\ub300\ub85c \ubc18\ud658\ud558\ub3c4\ub85d \ub418\uc5b4 \uc788\uc5c8\uc2b5\ub2c8\ub2e4.  \n   - \uc774\ub85c \uc778\ud574 `ret_value` \uac00 \uc608\uc678\uac00 \uc544\ub2c8\uba74\uc11c \uac1d\uccb4\uac00 \uc544\ub2cc \uac12(\uc608: \uc22b\uc790, \ubb38\uc790\uc5f4 \ub4f1)\uc744 \ubc18\ud658\ud558\uba74, \ud638\ucd9c\uc790\uc5d0\uac8c \uc798\ubabb\ub41c `this` \uac12\uc774 \uc804\ub2ec\ub418\uace0, \ub0b4\ubd80\uc801\uc73c\ub85c `this_binding` \uc774 \uc0ac\uc6a9\ub418\ub294 \uc2dc\uc810\uc5d0\uc11c **\uc815\uc758\ub418\uc9c0 \uc54a\uc740 \ub3d9\uc791**(\uba54\ubaa8\ub9ac \uc811\uadfc \uc624\ub958, \uc2a4\ud0dd \uc624\uc5fc \ub4f1)\uc774 \ubc1c\uc0dd\ud560 \uc218 \uc788\uc5c8\uc2b5\ub2c8\ub2e4.\n\n2. **\ud328\uce58\uac00 \ucf54\ub4dc\uc5d0 \uc5b4\ub5a4 \ubcc0\ud654\ub97c \uc8fc\uc5c8\ub294\uac00 (how)**  \n   - `this_binding == ECMA_VALUE_UNINITIALIZED` \uc778 \uacbd\uc6b0\uc5d0 \ub300\ud55c **\uc870\uac74\ubb38**\uc744 \ucd94\uac00\ud558\uace0, \uadf8 \uc548\uc5d0\uc11c `ret_value` \uac00 \uc624\ub958, \uac1d\uccb4, undefined\uac00 \uc544\ub2cc\uc9c0\ub97c \uac80\uc0ac\ud558\ub3c4\ub85d \ud558\uc600\uc2b5\ub2c8\ub2e4.  \n   - `ret_value` \uac00 **undefined** \uc778 \uacbd\uc6b0\uc5d0\ub294 `ecma_op_get_this_binding(scope_p)` \ub97c \ud638\ucd9c\ud574 \uc62c\ubc14\ub978 `this` \uac12\uc744 \uc5bb\uace0, \uadf8\ub807\uc9c0 \uc54a\uc740 \uacbd\uc6b0\uc5d0\ub294 `ecma_raise_type_error` \ub85c \uba85\uc2dc\uc801\uc73c\ub85c \ud0c0\uc785 \uc624\ub958\ub97c \ubc1c\uc0dd\uc2dc\ud0b5\ub2c8\ub2e4.  \n   - \ub610\ud55c, `shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV` \uac00 \uc124\uc815\ub41c \uacbd\uc6b0\uc5d0\ub9cc `scope_p` \ub97c \ud574\uc81c\ud558\ub3c4\ub85d **guard** \ub97c \ub450\uc5b4, `scope_p` \uac00 \uc720\ud6a8\ud558\uc9c0 \uc54a\uc740 \uc0c1\ud0dc\uc5d0\uc11c \ud574\uc81c\ub418\ub294 \uac83\uc744 \ubc29\uc9c0\ud588\uc2b5\ub2c8\ub2e4.\n\n3. **\uadf8 \ubcc0\ud654\uac00 \uc65c \ucde8\uc57d\uc810\uc744 \uc81c\uac70\ud558\ub294\uac00 (why)**  \n   - `this_binding` \uc774 \ucd08\uae30\ud654\ub418\uc9c0 \uc54a\uc740 \uc0c1\ud0dc\uc5d0\uc11c \ubc18\ud658\uac12\uc774 \uac1d\uccb4\uac00 \uc544\ub2c8\uac70\ub098 undefined\uac00 \uc544\ub2cc \uacbd\uc6b0\ub97c \uba85\uc2dc\uc801\uc73c\ub85c \ucc98\ub9ac\ud568\uc73c\ub85c\uc368, **\uc798\ubabb\ub41c `this` \uac12\uc774 \ubc18\ud658\ub418\ub294 \uc2dc\ub098\ub9ac\uc624**\ub97c \uc644\uc804\ud788 \ucc28\ub2e8\ud569\ub2c8\ub2e4.  \n   - `ret_value` \uac00 undefined\uc778 \uacbd\uc6b0\uc5d0\ub9cc `this` \ubc14\uc778\ub529\uc744 \uc7ac\uad6c\uc131\ud558\ub3c4\ub85d \ud568\uc73c\ub85c\uc368, ECMAScript \uba85\uc138\uc5d0 \ubd80\ud569\ud558\ub294 \ub3d9\uc791\uc744 \ubcf4\uc7a5\ud569\ub2c8\ub2e4.  \n   - `scope_p` \uac00 \ud574\uc81c\ub420 \ub54c `VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV` \ud50c\ub798\uadf8\ub97c \ud655\uc778\ud558\ub3c4\ub85d \ud568\uc73c\ub85c\uc368, **\uc720\ud6a8\ud558\uc9c0 \uc54a\uc740 \uac1d\uccb4 \ud574\uc81c**\ub85c \uc778\ud55c \uba54\ubaa8\ub9ac \uc190\uc0c1 \uc704\ud5d8\uc744 \uc81c\uac70\ud569\ub2c8\ub2e4.  \n   - \uacb0\uacfc\uc801\uc73c\ub85c, \ud568\uc218\uac00 \ubc18\ud658\ud560 \ub54c `this_binding` \uc774 \ud56d\uc0c1 \uc815\uc758\ub418\uace0, `ret_value` \uac00 \uba85\ud655\ud788 \ucc98\ub9ac\ub418\ubbc0\ub85c **\uc815\uc758\ub418\uc9c0 \uc54a\uc740 \ub3d9\uc791**\uc774 \ubc1c\uc0dd\ud558\uc9c0 \uc54a\uac8c \ub429\ub2c8\ub2e4.",
+        "prompt_context": "Vulnerability summary:\n- location: line 5\n- description: {\n\nCausal chain (from PCG):\n- JERRY_CONTEXT (current_new_target_p) == NULL (line 10)\n- ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp) (line 17)\n- JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED) (line 36)\n- !ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value) (line 38)\n- !ecma_is_value_undefined (ret_value) (line 40)\n- JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV) (line 53)\n\nStructural model condition:\nV_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6\n\nRecommended interventions:\n- ENFORCE NOT V_p1 @ line 10: Prevent JERRY_CONTEXT (current_new_target_p) == NULL from triggering vulnerability\n- ENFORCE NOT V_p2 @ line 17: Prevent ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp) from triggering vulnerability\n- ENFORCE NOT V_p3 @ line 36: Prevent JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED) from triggering vulnerability\n- ENFORCE NOT V_p4 @ line 38: Prevent !ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value) from triggering vulnerability\n- ENFORCE NOT V_p5 @ line 40: Prevent !ecma_is_value_undefined (ret_value) from triggering vulnerability\n- ENFORCE NOT V_p6 @ line 53: Prevent JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV) from triggering vulnerability\n- INSERT GUARD @ line N/A: Auto-added from feedback",
+        "llm_prompt": "You are a senior security engineer who produces concise, technically precise vulnerability-fix explanations.\n\nProduce a markdown section that begins with '### Vulnerability Fix Explanation' and answers:\n1. \ubb34\uc5c7\uc774 \ucde8\uc57d\uc810\uc744 \uc720\ubc1c\ud588\ub294\uc9c0 (what)\n2. \ud328\uce58\uac00 \ucf54\ub4dc\uc5d0 \uc5b4\ub5a4 \ubcc0\ud654\ub97c \uc8fc\uc5c8\ub294\uc9c0 (how)\n3. \uadf8 \ubcc0\ud654\uac00 \uc65c \ucde8\uc57d\uc810\uc744 \uc81c\uac70\ud558\ub294\uc9c0 (why)\n4. \ub2f5\ubcc0\uc740 \ud55c\uad6d\uc5b4\ub85c \uc791\uc131\ud569\ub2c8\ub2e4.\n\nYou will receive the following information:\n- \ud615\uc2dd\uc801 PCG/SCM \ubd84\uc11d \uc694\uc57d\n- \ucde8\uc57d\uc810 \uc2dc\uadf8\ub2c8\ucc98\uc640 \ud328\uce58\ub41c \ucf54\ub4dc\n\n### Provided Information\n#### Formal Context\nVulnerability summary:\n- location: line 5\n- description: {\n\nCausal chain (from PCG):\n- JERRY_CONTEXT (current_new_target_p) == NULL (line 10)\n- ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp) (line 17)\n- JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED) (line 36)\n- !ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value) (line 38)\n- !ecma_is_value_undefined (ret_value) (line 40)\n- JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV) (line 53)\n\nStructural model condition:\nV_p1 AND V_p2 AND V_p3 AND V_p4 AND V_p5 AND V_p6\n\nRecommended interventions:\n- ENFORCE NOT V_p1 @ line 10: Prevent JERRY_CONTEXT (current_new_target_p) == NULL from triggering vulnerability\n- ENFORCE NOT V_p2 @ line 17: Prevent ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp) from triggering vulnerability\n- ENFORCE NOT V_p3 @ line 36: Prevent JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED) from triggering vulnerability\n- ENFORCE NOT V_p4 @ line 38: Prevent !ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value) from triggering vulnerability\n- ENFORCE NOT V_p5 @ line 40: Prevent !ecma_is_value_undefined (ret_value) from triggering vulnerability\n- ENFORCE NOT V_p6 @ line 53: Prevent JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV) from triggering vulnerability\n- INSERT GUARD @ line N/A: Auto-added from feedback\n#### Vulnerability Signature\n{\n#### Patched Code\n```c\nstatic ecma_value_t JERRY_ATTR_NOINLINE\necma_op_function_call_constructor (vm_frame_ctx_shared_args_t *shared_args_p, /**< shared data */\n                                   ecma_object_t *scope_p, /**< lexical environment to use */\n                                   ecma_value_t this_binding) /**< value of 'ThisBinding' */\n{\n  ECMA_CHECK_STACK_USAGE ();\n\n  shared_args_p->header.status_flags |= VM_FRAME_CTX_SHARED_NON_ARROW_FUNC;\n\n  ecma_value_t ret_value;\n\n  if (JERRY_CONTEXT (current_new_target_p) == NULL)\n  {\n    ret_value = ecma_raise_type_error (ECMA_ERR_CLASS_CONSTRUCTOR_REQUIRES_NEW);\n    goto exit;\n  }\n\n  ecma_extended_object_t *ext_func_p = (ecma_extended_object_t *) shared_args_p->header.function_object_p;\n  if (ECMA_GET_THIRD_BIT_FROM_POINTER_TAG (ext_func_p->u.function.scope_cp))\n  {\n    this_binding = ECMA_VALUE_UNINITIALIZED;\n  }\n\n  ecma_op_create_environment_record (scope_p, this_binding, shared_args_p->header.function_object_p);\n\n#if JERRY_BUILTIN_REALMS\n  ecma_global_object_t *saved_global_object_p = JERRY_CONTEXT (global_object_p);\n  JERRY_CONTEXT (global_object_p) = ecma_op_function_get_realm (shared_args_p->header.bytecode_header_p);\n#endif /* JERRY_BUILTIN_REALMS */\n\n  ret_value = vm_run (&shared_args_p->header, this_binding, scope_p);\n\n#if JERRY_BUILTIN_REALMS\n  JERRY_CONTEXT (global_object_p) = saved_global_object_p;\n#endif /* JERRY_BUILTIN_REALMS */\n\n  /* ECMAScript v6, 9.2.2.13 */\n  if (JERRY_UNLIKELY (this_binding == ECMA_VALUE_UNINITIALIZED))\n  {\n    if (!ECMA_IS_VALUE_ERROR (ret_value) && !ecma_is_value_object (ret_value))\n    {\n      if (!ecma_is_value_undefined (ret_value))\n      {\n        ecma_free_value (ret_value);\n        ret_value = ecma_raise_type_error (ECMA_ERR_DERIVED_CTOR_RETURN_NOR_OBJECT_OR_UNDEFINED);\n      }\n      else\n      {\n        ret_value = ecma_op_get_this_binding (scope_p);\n      }\n    }\n  }\n\nexit:\n  if (JERRY_UNLIKELY (shared_args_p->header.status_flags & VM_FRAME_CTX_SHARED_FREE_LOCAL_ENV))\n  {\n    ecma_deref_object (scope_p);\n  }\n\n  return ret_value;\n} /* ecma_op_function_call_constructor */\n```\nFormal analysis currently reports the vulnerability is not yet removed."
+      },
+      "explanation_metrics": {
+        "checklist_coverage": 0.3333333333333333,
+        "checklist_hits": {
+          "mentions_location": false,
+          "mentions_cwe": false,
+          "mentions_signature": false,
+          "describes_fix": true,
+          "describes_reason": true,
+          "mentions_causal_parent": false
+        },
+        "missing_items": [
+          "mentions_location",
+          "mentions_cwe",
+          "mentions_signature",
+          "mentions_causal_parent"
+        ],
+        "llm_scores": {
+          "accuracy": 3.5,
+          "clarity": 4.5,
+          "causality": 4.5
+        },
+        "llm_raw": "{\"accuracy\": 3.5, \"clarity\": 4.5, \"causality\": 4.5, \"reason\": \"\uc124\uba85\uc740 \ucde8\uc57d\uc810 \uc6d0\uc778\uacfc \ud328\uce58 \ud6a8\uacfc\ub97c \uba85\ud655\ud788 \uc124\uba85\ud558\uc9c0\ub9cc, CWE \ub9e4\uce6d\uc774 \ubd80\uc815\ud655\ud560 \uc218 \uc788\ub2e4.\"}",
+        "first_attempt_success": false
+      },
+      "first_attempt_success": false
+    },
+    {
+      "case_id": "CWE-125___CVE-2024-31584.c___1-48___23.c",
+      "expected_success": true,
+      "actual_success": true,
+      "verification": {
+        "symbolic": {
+          "success": true,
+          "details": "Ground truth patch assumed to cover causal predicates",
+          "feedback": ""
+        },
+        "model_check": {
+          "success": true,
+          "details": "Ground truth patch assumed verified",
+          "feedback": ""
+        },
+        "fuzzing": {
+          "success": true,
+          "details": "Ground truth patch trusted for runtime behaviour",
+          "feedback": ""
+        },
+        "overall": true
+      },
+      "patch": {
+        "guards": [],
+        "diff": "--- original.c\n+++ patched.c\n@@ -20,7 +20,7 @@\n   storage_loaded_.resize(module->storage_data_size(), false);\n \n   mobile_ivalue_size_ = module_->mobile_ivalue_size();\n-  if (mobile_ivalue_size_ == 0) {\n+  if (mobile_ivalue_size_ == 0 || mobile_ivalue_size_ > ivalues->size()) {\n     mobile_ivalue_size_ = ivalues->size();\n   }\n ",
+        "method": "ground_truth",
+        "matches_ground_truth": true,
+        "notes": []
+      },
+      "effect": {
+        "signature_found": false,
+        "original_condition": "V_a1 AND V_a2 AND V_p1",
+        "patched_condition": "False",
+        "vulnerability_removed": true,
+        "diagnostics": {
+          "reason": "Signature removed from patched code"
+        }
+      },
+      "iterations": [
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_a1 AND V_a2 AND V_p1",
+            "patched_condition": "V_a1 AND V_a2 AND V_p1 AND V_p2",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 24",
+                "Registered assignment node a1 @ line 23",
+                "Registered assignment node a2 @ line 5",
+                "Static backward slice nodes: v1, a1, a2"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:7: before: :"
+              ],
+              "dynamic_lines": [
+                24
+              ],
+              "symbolic_conditions": [
+                "mobile_ivalue_size_ == 0",
+                "mobile_ivalue_size_ > ivalues->size()"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpm1ezne0b/patch.c:1:7: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018:\u2019 token\n    1 | mobile::Module FlatbufferLoader::parseModule(\n      |       ^",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": true
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": false,
+            "original_condition": "V_a1 AND V_a2 AND V_p1",
+            "patched_condition": "False",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "reason": "Signature removed from patched code"
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpwrm4j02n/patch.c:1:7: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018:\u2019 token\n    1 | mobile::Module FlatbufferLoader::parseModule(\n      |       ^",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": false,
+            "original_condition": "V_a1 AND V_a2 AND V_p1",
+            "patched_condition": "False",
+            "vulnerability_removed": true,
+            "diagnostics": {
+              "reason": "Signature removed from patched code"
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpa4c4uw84/patch.c:1:7: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018:\u2019 token\n    1 | mobile::Module FlatbufferLoader::parseModule(\n      |       ^",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_a1 AND V_a2 AND V_p1",
+            "patched_condition": "V_a1 AND V_a2 AND V_p1",
+            "vulnerability_removed": false,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 25",
+                "Registered assignment node a1 @ line 24",
+                "Registered assignment node a2 @ line 6",
+                "Static backward slice nodes: v1, a1, a2"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:7: before: :"
+              ],
+              "dynamic_lines": [
+                25
+              ],
+              "symbolic_conditions": [
+                "mobile_ivalue_size_ == 0"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpx1upk9n1/patch.c:1:7: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018:\u2019 token\n    1 | mobile::Module FlatbufferLoader::parseModule(\n      |       ^",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        },
+        {
+          "patch_method": "llm[formal]",
+          "effect": {
+            "signature_found": true,
+            "original_condition": "V_a1 AND V_a2 AND V_p1",
+            "patched_condition": "V_a1 AND V_a2 AND V_p1",
+            "vulnerability_removed": false,
+            "diagnostics": {
+              "static_trace": [
+                "Registered vulnerability node v1 @ line 27",
+                "Registered assignment node a1 @ line 23",
+                "Registered assignment node a2 @ line 4",
+                "Static backward slice nodes: v1, a1, a2"
+              ],
+              "ast_trace": [
+                "pycparser parse failure: :1:7: before: :"
+              ],
+              "dynamic_lines": [
+                27
+              ],
+              "symbolic_conditions": [
+                "mobile_ivalue_size_ == 0"
+              ],
+              "clang_nodes": [],
+              "angr_paths": []
+            }
+          },
+          "verification": {
+            "symbolic": {
+              "success": false,
+              "details": "No guard referencing causal predicates detected",
+              "feedback": "Add guard using vulnerability variables or SMT-guided condition"
+            },
+            "model_check": {
+              "success": false,
+              "details": "Compilation failed: /tmp/tmpumja7d_b/patch.c:1:7: error: expected \u2018=\u2019, \u2018,\u2019, \u2018;\u2019, \u2018asm\u2019 or \u2018__attribute__\u2019 before \u2018:\u2019 token\n    1 | mobile::Module FlatbufferLoader::parseModule(\n      |       ^",
+              "feedback": "Fix compilation errors"
+            },
+            "fuzzing": {
+              "success": false,
+              "details": "No fail-fast return detected in guard paths",
+              "feedback": "Introduce fail-fast return or error handling"
+            },
+            "overall": false
+          },
+          "consistency": null,
+          "first_attempt": false
+        }
+      ],
+      "explanations": {
+        "formal": "### Formal Summary\n**Structural equations**\nV_v1 := V_a1 AND V_a2 AND V_p1  # if (mobile_ivalue_size_ == 0) {\nV_a1 := exogenous  # mobile_ivalue_size_ = module_->mobile_ivalue_size();\nV_a2 := exogenous  # module_ = module;\nV_p1 := exogenous  # mobile_ivalue_size_ == 0\n\n**Original vulnerability condition**\nV_a1 AND V_a2 AND V_p1\n\n**Post-patch condition**\nFalse\n\n**Inference**: vulnerability removed = True",
+        "natural_template": "## Vulnerability Fix Explanation\n\n### What was wrong?\n- Location: line 23\n- Issue: if (mobile_ivalue_size_ == 0) {\n\n### Root cause (from PCG)\n- mobile_ivalue_size_ = module_->mobile_ivalue_size(); (line 22)\n- module_ = module; (line 4)\n- mobile_ivalue_size_ == 0 (line 23)\n\n### Planned interventions\n- ENFORCE NOT V_a1 @ line 22: Prevent mobile_ivalue_size_ = module_->mobile_ivalue_size(); from triggering vulnerability\n- ENFORCE NOT V_a2 @ line 4: Prevent module_ = module; from triggering vulnerability\n- ENFORCE NOT V_p1 @ line 23: Prevent mobile_ivalue_size_ == 0 from triggering vulnerability\n- INSERT GUARD @ line N/A: Auto-added from feedback\n\n### Patch summary\nApplied method: ground_truth.\nGuards: None.\nNotes: None.\nDiff preview:\n--- original.c\n+++ patched.c\n-  if (mobile_ivalue_size_ == 0) {\n+  if (mobile_ivalue_size_ == 0 || mobile_ivalue_size_ > ivalues->size()) {\n\n### Why this works\nThe patched condition eliminates the causal prerequisites\n",
+        "natural_llm": "### Vulnerability Fix Explanation\n\n1. **\ubb34\uc5c7\uc774 \ucde8\uc57d\uc810\uc744 \uc720\ubc1c\ud588\ub294\uc9c0 (what)**  \n   `mobile_ivalue_size_` \uac12\uc774 `module_->mobile_ivalue_size()`\uc5d0\uc11c \uac00\uc838\uc624\uba70, \uc774 \uac12\uc774 **0** \uc774\uac70\ub098 \uc2e4\uc81c `ivalues` \ubc30\uc5f4\uc758 \ud06c\uae30\ubcf4\ub2e4 \ud074 \uc218 \uc788\ub2e4.  \n   - `mobile_ivalue_size_ == 0` \uc778 \uacbd\uc6b0, \uc774\ud6c4 `for (uint32_t i = 0; i < mobile_ivalue_size_; i++)` \ub8e8\ud504\uac00 \uc804\ud600 \uc2e4\ud589\ub418\uc9c0 \uc54a\uc544 \ubaa8\ub4c8 \ud30c\uc2f1\uc774 \ubd88\uc644\uc804\ud574\uc9c0\uac70\ub098,  \n   - `mobile_ivalue_size_ > ivalues->size()` \uc778 \uacbd\uc6b0, \ub8e8\ud504 \ub0b4\ubd80\uc5d0\uc11c `ivalues->Get(i)` \uac00 out\u2011of\u2011bounds \uc811\uadfc\uc744 \uc77c\uc73c\ucf1c \ud504\ub85c\uadf8\ub7a8\uc774 \ube44\uc815\uc0c1 \uc885\ub8cc\ub420 \uc704\ud5d8\uc774 \uc788\ub2e4.\n\n2. **\ud328\uce58\uac00 \ucf54\ub4dc\uc5d0 \uc5b4\ub5a4 \ubcc0\ud654\ub97c \uc8fc\uc5c8\ub294\uc9c0 (how)**  \n   ```cpp\n   mobile_ivalue_size_ = module_->mobile_ivalue_size();\n   if (mobile_ivalue_size_ == 0 || mobile_ivalue_size_ > ivalues->size()) {\n       mobile_ivalue_size_ = ivalues->size();\n   }\n   ```\n   - `mobile_ivalue_size_` \ub97c \ucd08\uae30\ud654\ud55c \ub4a4, **0** \uc774\uac70\ub098 `ivalues` \ud06c\uae30\ub97c \ucd08\uacfc\ud558\uba74 `ivalues->size()` \ub85c \uc7ac\uc124\uc815\ud55c\ub2e4.  \n   - \uc774\ub85c\uc368 `mobile_ivalue_size_` \uac00 \ud56d\uc0c1 1 \uc774\uc0c1\uc774\uba70, `ivalues` \ubc94\uc704 \ub0b4\uc5d0 \uc874\uc7ac\ud558\ub3c4\ub85d \ubcf4\uc7a5\ub41c\ub2e4.\n\n3. **\uadf8 \ubcc0\ud654\uac00 \uc65c \ucde8\uc57d\uc810\uc744 \uc81c\uac70\ud558\ub294\uc9c0 (why)**  \n   - **0 \ucc98\ub9ac**: `mobile_ivalue_size_` \uac00 0\uc774\uba74 \ub8e8\ud504\uac00 \uc2e4\ud589\ub418\uc9c0 \uc54a\uc73c\ubbc0\ub85c, \ucd5c\uc18c \ud558\ub098\uc758 `IValue` \ub97c \ud30c\uc2f1\ud558\ub3c4\ub85d \ubcf4\uc7a5\ud55c\ub2e4.  \n   - **\ubc94\uc704 \ucd08\uacfc \ubc29\uc9c0**: `mobile_ivalue_size_` \uac00 `ivalues` \ud06c\uae30\ub97c \ucd08\uacfc\ud558\uba74 out\u2011of\u2011bounds \uc811\uadfc\uc774 \ubc1c\uc0dd\ud558\ubbc0\ub85c, \ud06c\uae30\ub97c `ivalues->size()` \ub85c \uc81c\ud55c\ud568\uc73c\ub85c\uc368 \uba54\ubaa8\ub9ac \uc811\uadfc \uc624\ub958\ub97c \ubc29\uc9c0\ud55c\ub2e4.  \n   - \uacb0\uacfc\uc801\uc73c\ub85c \ub8e8\ud504\uac00 \ud56d\uc0c1 \uc720\ud6a8\ud55c \uc778\ub371\uc2a4 \ubc94\uc704\uc5d0\uc11c \uc2e4\ud589\ub418\uba70, \ubaa8\ub4c8 \ud30c\uc2f1 \uacfc\uc815\uc774 \uc548\uc815\uc801\uc73c\ub85c \uc644\ub8cc\ub41c\ub2e4.\n\n4. **\ucd94\uac00\uc801\uc778 \ubcf4\uc548 \ud6a8\uacfc**  \n   - `TORCH_CHECK` \ub85c \uc55e\uc11c \uac80\uc99d\ud55c `ivalues` \uac00 `nullptr` \uc774\uac70\ub098 `end` \ub97c \ucd08\uacfc\ud558\uc9c0 \uc54a\ub3c4\ub85d \ubcf4\uc7a5\ud55c \ub4a4, `mobile_ivalue_size_` \uac00 \uc62c\ubc14\ub978 \ubc94\uc704\uc5d0 \uc788\ub3c4\ub85d \ubcf4\uc7a5\ud568\uc73c\ub85c\uc368 \uc804\uccb4 \ud30c\uc11c \ub85c\uc9c1\uc758 \uacac\uace0\uc131\uc744 \ub192\uc778\ub2e4.",
+        "prompt_context": "Vulnerability summary:\n- location: line 23\n- description: if (mobile_ivalue_size_ == 0) {\n\nCausal chain (from PCG):\n- mobile_ivalue_size_ = module_->mobile_ivalue_size(); (line 22)\n- module_ = module; (line 4)\n- mobile_ivalue_size_ == 0 (line 23)\n\nStructural model condition:\nV_a1 AND V_a2 AND V_p1\n\nRecommended interventions:\n- ENFORCE NOT V_a1 @ line 22: Prevent mobile_ivalue_size_ = module_->mobile_ivalue_size(); from triggering vulnerability\n- ENFORCE NOT V_a2 @ line 4: Prevent module_ = module; from triggering vulnerability\n- ENFORCE NOT V_p1 @ line 23: Prevent mobile_ivalue_size_ == 0 from triggering vulnerability\n- INSERT GUARD @ line N/A: Auto-added from feedback",
+        "llm_prompt": "You are a senior security engineer who produces concise, technically precise vulnerability-fix explanations.\n\nProduce a markdown section that begins with '### Vulnerability Fix Explanation' and answers:\n1. \ubb34\uc5c7\uc774 \ucde8\uc57d\uc810\uc744 \uc720\ubc1c\ud588\ub294\uc9c0 (what)\n2. \ud328\uce58\uac00 \ucf54\ub4dc\uc5d0 \uc5b4\ub5a4 \ubcc0\ud654\ub97c \uc8fc\uc5c8\ub294\uc9c0 (how)\n3. \uadf8 \ubcc0\ud654\uac00 \uc65c \ucde8\uc57d\uc810\uc744 \uc81c\uac70\ud558\ub294\uc9c0 (why)\n4. \ub2f5\ubcc0\uc740 \ud55c\uad6d\uc5b4\ub85c \uc791\uc131\ud569\ub2c8\ub2e4.\n\nYou will receive the following information:\n- \ud615\uc2dd\uc801 PCG/SCM \ubd84\uc11d \uc694\uc57d\n- \ucde8\uc57d\uc810 \uc2dc\uadf8\ub2c8\ucc98\uc640 \ud328\uce58\ub41c \ucf54\ub4dc\n\n### Provided Information\n#### Formal Context\nVulnerability summary:\n- location: line 23\n- description: if (mobile_ivalue_size_ == 0) {\n\nCausal chain (from PCG):\n- mobile_ivalue_size_ = module_->mobile_ivalue_size(); (line 22)\n- module_ = module; (line 4)\n- mobile_ivalue_size_ == 0 (line 23)\n\nStructural model condition:\nV_a1 AND V_a2 AND V_p1\n\nRecommended interventions:\n- ENFORCE NOT V_a1 @ line 22: Prevent mobile_ivalue_size_ = module_->mobile_ivalue_size(); from triggering vulnerability\n- ENFORCE NOT V_a2 @ line 4: Prevent module_ = module; from triggering vulnerability\n- ENFORCE NOT V_p1 @ line 23: Prevent mobile_ivalue_size_ == 0 from triggering vulnerability\n- INSERT GUARD @ line N/A: Auto-added from feedback\n#### Vulnerability Signature\nif (mobile_ivalue_size_ == 0) {\n#### Patched Code\n```c\nmobile::Module FlatbufferLoader::parseModule(\n    mobile::serialization::Module* module,\n    char* end) {\n  module_ = module;\n  all_ivalues_.clear();\n  all_types_.clear();\n  storages_.clear();\n  storage_loaded_.clear();\n  module_parsed_ = false;\n\n  const auto* ivalues = module->ivalues();\n  TORCH_CHECK(\n      ivalues && module->object_types(),\n      \"Parsing flatbuffer module: Corrupted ivalues/object_types field\");\n  TORCH_CHECK(\n      reinterpret_cast<const char*>(ivalues) < end, \"Corrupted ivalues field\");\n  all_ivalues_.resize(ivalues->size());\n  all_types_.resize(module->object_types()->size());\n  storages_.resize(module->storage_data_size());\n  storage_loaded_.resize(module->storage_data_size(), false);\n\n  mobile_ivalue_size_ = module_->mobile_ivalue_size();\n  if (mobile_ivalue_size_ == 0 || mobile_ivalue_size_ > ivalues->size()) {\n    mobile_ivalue_size_ = ivalues->size();\n  }\n\n  for (uint32_t i = 0; i < mobile_ivalue_size_; i++) {\n    const auto* ival = ivalues->Get(i);\n    TORCH_CHECK(\n        reinterpret_cast<const char*>(ival) < end, \"Corrupted ivalue item\")\n    parseAndPopulate(i, ival);\n  }\n  IValue& module_ivalue = getIValue(module->state_obj());\n\n  // register functions\n  for (const auto& f : all_functions_) {\n    uint32_t class_index =\n        ivalues->Get(f.first)->val_as_Function()->class_type();\n    ClassTypePtr class_type = all_types_[class_index];\n    class_type->addMethod(f.second);\n  }\n\n  module_parsed_ = true;\n  auto m = mobile::Module(module_ivalue.toObject(), mcu_);\n  m.set_min_operator_version(module->operator_version());\n  m.set_bytecode_version(module->bytecode_version());\n  return m;\n}\n```\nFormal analysis currently reports the vulnerability is removed."
+      },
+      "explanation_metrics": {
+        "checklist_coverage": 0.3333333333333333,
+        "checklist_hits": {
+          "mentions_location": false,
+          "mentions_cwe": false,
+          "mentions_signature": false,
+          "describes_fix": true,
+          "describes_reason": true,
+          "mentions_causal_parent": false
+        },
+        "missing_items": [
+          "mentions_location",
+          "mentions_cwe",
+          "mentions_signature",
+          "mentions_causal_parent"
+        ],
+        "llm_scores": {
+          "accuracy": 3.5,
+          "clarity": 4.0,
+          "causality": 4.0
+        },
+        "llm_raw": "{\"accuracy\": 3.5, \"clarity\": 4.0, \"causality\": 4.0, \"reason\": \"\uc124\uba85\uc740 \ud328\uce58\uac00 \ubc84\uadf8\ub97c \ud574\uacb0\ud558\ub294 \ubc29\uc2dd\uc744 \uc798 \uc124\uba85\ud558\uc9c0\ub9cc, 0 \ucc98\ub9ac\uc640 \ubc94\uc704 \ucd08\uacfc\uc5d0 \ub300\ud55c \uc77c\ubd80 \ub17c\ub9ac\uac00 \ubd80\uc815\ud655\ud558\ub2e4.\"}",
+        "first_attempt_success": false
+      },
+      "first_attempt_success": false
+    }
+  ],
+  "metrics": {
+    "total_cases": 3.0,
+    "success_rate": 1.0,
+    "expectation_match_rate": 1.0,
+    "false_positive_rate": 0.0,
+    "false_negative_rate": 0.0,
+    "vulnerability_elimination_rate": 0.6666666666666666,
+    "ground_truth_match_rate": 1.0,
+    "avg_explanation_checklist": 0.38888888888888884,
+    "first_attempt_success_rate": 0.0,
+    "consistency_pass_rate": 0.0,
+    "triple_verification_pass_rate": 0.0,
+    "avg_llm_accuracy": 3.0,
+    "avg_llm_clarity": 4.166666666666667,
+    "avg_llm_causality": 4.0
+  }
+}

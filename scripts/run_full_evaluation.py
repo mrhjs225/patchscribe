@@ -306,8 +306,21 @@ def main():
                        help='Which conditions to run (default: all)')
     parser.add_argument('--skip-analysis', action='store_true',
                        help='Skip RQ analysis step')
+    parser.add_argument('--llm-provider', type=str, default='ollama',
+                       help='LLM provider (default: ollama)')
+    parser.add_argument('--llm-model', type=str, default='gpt-oss:20b',
+                       help='LLM model name (default: gpt-oss:20b)')
+    parser.add_argument('--llm-endpoint', type=str,
+                       help='LLM endpoint URL (default: provider-specific)')
     
     args = parser.parse_args()
+    
+    # Set LLM environment variables from command line args
+    import os
+    os.environ['PATCHSCRIBE_LLM_PROVIDER'] = args.llm_provider
+    os.environ['PATCHSCRIBE_LLM_MODEL'] = args.llm_model
+    if args.llm_endpoint:
+        os.environ['PATCHSCRIBE_LLM_ENDPOINT'] = args.llm_endpoint
     
     # Create output directory
     output_dir = args.output
@@ -325,6 +338,10 @@ def main():
     print(f"Dataset: {args.dataset}")
     print(f"Output: {output_dir}")
     print(f"Conditions: {args.conditions}")
+    print(f"LLM Provider: {args.llm_provider}")
+    print(f"LLM Model: {args.llm_model}")
+    if args.llm_endpoint:
+        print(f"LLM Endpoint: {args.llm_endpoint}")
     print("="*80)
     
     # Load dataset

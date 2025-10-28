@@ -43,8 +43,34 @@ def create_sample_cases():
 
 def main():
     """Run quick evaluation"""
+    import argparse
+    import os
+    
+    parser = argparse.ArgumentParser(description='Quick PatchScribe evaluation')
+    parser.add_argument('dataset', nargs='?', default=None,
+                       help='Dataset name (poc/zeroday) or path to JSON file')
+    parser.add_argument('--llm-provider', type=str, default='ollama',
+                       help='LLM provider (default: ollama)')
+    parser.add_argument('--llm-model', type=str, default='gpt-oss:20b',
+                       help='LLM model name (default: gpt-oss:20b)')
+    parser.add_argument('--llm-endpoint', type=str,
+                       help='LLM endpoint URL (default: provider-specific)')
+    
+    args = parser.parse_args()
+    
+    # Set LLM environment variables from command line args
+    os.environ['PATCHSCRIBE_LLM_PROVIDER'] = args.llm_provider
+    os.environ['PATCHSCRIBE_LLM_MODEL'] = args.llm_model
+    if args.llm_endpoint:
+        os.environ['PATCHSCRIBE_LLM_ENDPOINT'] = args.llm_endpoint
+    
     print("="*80)
     print("PATCHSCRIBE QUICK EVALUATION")
+    print("="*80)
+    print(f"LLM Provider: {args.llm_provider}")
+    print(f"LLM Model: {args.llm_model}")
+    if args.llm_endpoint:
+        print(f"LLM Endpoint: {args.llm_endpoint}")
     print("="*80)
     
     # Create output directory
@@ -52,8 +78,8 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Use sample cases or load from file/dataset
-    if len(sys.argv) > 1:
-        arg = sys.argv[1]
+    if args.dataset:
+        arg = args.dataset
         
         # Check if it's a dataset name
         if arg in ['poc', 'zeroday']:
