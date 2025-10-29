@@ -129,15 +129,15 @@ class ExplanationEvaluator:
             ensure_ascii=False,
         )
         instructions = (
-            "당신은 보안 패치 설명을 평가하는 심판 모델입니다. "
-            "입력으로 주어지는 JSON 메타데이터와 설명 텍스트를 참고하여 "
-            "정확성(accuracy), 명료성(clarity), 인과 정합성(causality)을 1~5 실수 점수로 평가하고 "
-            "다음 형식의 JSON만 출력하세요:\n"
-            '{"accuracy": <float>, "clarity": <float>, "causality": <float>, "reason": "<short korean summary>"}'
+            "You are a judge model evaluating security patch explanations. "
+            "Based on the provided JSON metadata and explanation text, "
+            "evaluate accuracy, clarity, and causality on a 1-5 float scale, "
+            "and output only JSON in the following format:\n"
+            '{"accuracy": <float>, "clarity": <float>, "causality": <float>, "reason": "<short english summary>"}'
         )
         return (
             instructions
             + "\n\n"
-            + f"메타데이터: {metadata}\n"
-            + f"설명 텍스트:\n{explanation}"
+            + f"Metadata: {metadata}\n"
+            + f"Explanation text:\n{explanation}"
         )

@@ -55,7 +55,7 @@ class PatchScribePipeline:
         *,
         strategy: str = "formal",
         explain_mode: str = "template",
-        explanation_patch_source: str = "ground_truth",
+        explanation_patch_source: str = "generated",
         explanation_extra_prompt: str | None = None,
         enable_consistency_check: bool = True,
         enable_performance_profiling: bool = False,

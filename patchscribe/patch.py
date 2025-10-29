@@ -43,22 +43,12 @@ class PatchGenerator:
         self.natural_context = natural_context
 
     def generate(self, spec: InterventionSpec) -> PatchResult:
-        # 1) Attempt LLM-guided patch if available.
+        # Only attempt LLM-guided patch. If it fails, return noop.
         llm_result = self._try_llm_patch(spec)
         if llm_result:
             return llm_result
 
-        # 2) Attempt structured guard insertion based on interventions.
-        guard_result = self._spec_guard_patch(spec)
-        if guard_result:
-            return guard_result
-
-        # 3) Apply pattern-based mitigations for common vulnerability APIs.
-        mitigation_result = self._apply_known_mitigations()
-        if mitigation_result:
-            return mitigation_result
-
-        # 4) No change possible, return noop result.
+        # LLM patch generation failed - return noop result.
         return PatchResult(patched_code=self.program, diff="", applied_guards=[], method="noop")
 
     def _try_llm_patch(self, spec: InterventionSpec) -> PatchResult | None:

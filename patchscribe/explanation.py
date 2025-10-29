@@ -268,10 +268,10 @@ def _build_llm_prompt(
     )
     objective = (
         "Produce a markdown section that begins with '### Vulnerability Fix Explanation' and answers:\n"
-        "1. 무엇이 취약점을 유발했는지 (what)\n"
-        "2. 패치가 코드에 어떤 변화를 주었는지 (how)\n"
-        "3. 그 변화가 왜 취약점을 제거하는지 (why)\n"
-        "4. 답변은 한국어로 작성합니다."
+        "1. What caused the vulnerability (what)\n"
+        "2. How the patch changes the code (how)\n"
+        "3. Why this change eliminates the vulnerability (why)\n"
+        "4. Write your response in English."
     )
     if extra_instructions:
         objective += "\n" + extra_instructions.strip()

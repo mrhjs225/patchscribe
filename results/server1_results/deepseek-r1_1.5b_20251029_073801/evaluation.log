@@ -1,0 +1,257 @@
+================================================================================
+PATCHSCRIBE RQ EVALUATION
+================================================================================
+Dataset: zeroday
+Output: results/server1_results/deepseek-r1_1.5b_20251029_073801
+Conditions: ['all']
+LLM Provider: ollama
+LLM Model: deepseek-r1:1.5b
+================================================================================
+📂 Loading dataset from: zeroday
+Using built-in zeroday dataset
+✅ Loaded 97 test cases
+
+================================================================================
+RQ1 - Condition C1: Baseline (post-hoc, no formal guidance)
+================================================================================
+✅ Baseline results saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/raw_results/baseline_c1_results.json
+   Success rate: 100.0%
+
+================================================================================
+RQ1 - Condition C2: Vague Hints (informal prompts)
+================================================================================
+✅ Vague hints results saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/raw_results/vague_hints_c2_results.json
+   Success rate: 100.0%
+
+================================================================================
+RQ1 - Condition C3: Pre-hoc Guidance (E_bug without verification)
+================================================================================
+✅ Pre-hoc guidance results saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/raw_results/prehoc_c3_results.json
+   Success rate: 100.0%
+
+================================================================================
+RQ1 - Condition C4: Full PatchScribe (E_bug + triple verification)
+================================================================================
+✅ Full PatchScribe results saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/raw_results/full_patchscribe_c4_results.json
+   Success rate: 100.0%
+   Consistency pass rate: 60.8%
+   Triple verification rate: 60.8%
+
+================================================================================
+RUNNING RQ ANALYSIS
+================================================================================
+
+📊 Analyzing: full_patchscribe_c4_results.json
+
+================================================================================
+GENERATING COMPREHENSIVE RQ ANALYSIS REPORT
+================================================================================
+
+================================================================================
+RQ1: Theory-Guided Generation Effectiveness
+================================================================================
+
+Condition: unknown
+  Total cases: 97
+  Triple verification rate: 60.8%
+  Ground truth similarity: 100.0%
+  First attempt success rate: 0.0%
+
+================================================================================
+RQ2: Dual Verification Effectiveness
+================================================================================
+
+Incomplete patches detected: 38/97 (39.2%)
+
+Consistency violation breakdown:
+  causal_coverage: 0 cases
+  intervention_validity: 1 cases
+  logical_consistency: 24 cases
+  completeness: 19 cases
+
+Triple verification effectiveness:
+  Method: Triple Verification (V4)
+  Patches caught: 38
+  Note: Precision/Recall require manual validation of incomplete patches
+
+================================================================================
+RQ3: Scalability and Performance
+================================================================================
+
+================================================================================
+RQ4: Explanation Quality and Developer Trust
+================================================================================
+
+Explanation type: Dual Explanations (E_bug + E_patch)
+  Avg checklist coverage: 8.6%
+  Avg accuracy score: 3.11/5
+  Avg clarity score: 2.88/5
+  Avg causality score: 3.02/5
+
+✅ Comprehensive RQ analysis saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/rq_analysis/rq_analysis_full_patchscribe_c4.json
+✅ Markdown summary saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/rq_analysis/rq_analysis_full_patchscribe_c4.md
+
+📊 Analyzing: baseline_c1_results.json
+
+================================================================================
+GENERATING COMPREHENSIVE RQ ANALYSIS REPORT
+================================================================================
+
+================================================================================
+RQ1: Theory-Guided Generation Effectiveness
+================================================================================
+
+Condition: unknown
+  Total cases: 97
+  Triple verification rate: 0.0%
+  Ground truth similarity: 100.0%
+  First attempt success rate: 0.0%
+
+================================================================================
+RQ2: Dual Verification Effectiveness
+================================================================================
+
+Incomplete patches detected: 0/97 (0.0%)
+
+Consistency violation breakdown:
+  causal_coverage: 0 cases
+  intervention_validity: 0 cases
+  logical_consistency: 0 cases
+  completeness: 0 cases
+
+Triple verification effectiveness:
+  Method: Triple Verification (V4)
+  Patches caught: 0
+  Note: Precision/Recall require manual validation of incomplete patches
+
+================================================================================
+RQ3: Scalability and Performance
+================================================================================
+
+================================================================================
+RQ4: Explanation Quality and Developer Trust
+================================================================================
+
+Explanation type: Dual Explanations (E_bug + E_patch)
+  Avg checklist coverage: 20.3%
+  Avg accuracy score: 3.70/5
+  Avg clarity score: 3.37/5
+  Avg causality score: 3.82/5
+
+✅ Comprehensive RQ analysis saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/rq_analysis/rq_analysis_baseline_c1.json
+✅ Markdown summary saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/rq_analysis/rq_analysis_baseline_c1.md
+
+📊 Analyzing: prehoc_c3_results.json
+
+================================================================================
+GENERATING COMPREHENSIVE RQ ANALYSIS REPORT
+================================================================================
+
+================================================================================
+RQ1: Theory-Guided Generation Effectiveness
+================================================================================
+
+Condition: unknown
+  Total cases: 97
+  Triple verification rate: 0.0%
+  Ground truth similarity: 100.0%
+  First attempt success rate: 0.0%
+
+================================================================================
+RQ2: Dual Verification Effectiveness
+================================================================================
+
+Incomplete patches detected: 0/97 (0.0%)
+
+Consistency violation breakdown:
+  causal_coverage: 0 cases
+  intervention_validity: 0 cases
+  logical_consistency: 0 cases
+  completeness: 0 cases
+
+Triple verification effectiveness:
+  Method: Triple Verification (V4)
+  Patches caught: 0
+  Note: Precision/Recall require manual validation of incomplete patches
+
+================================================================================
+RQ3: Scalability and Performance
+================================================================================
+
+================================================================================
+RQ4: Explanation Quality and Developer Trust
+================================================================================
+
+Explanation type: Dual Explanations (E_bug + E_patch)
+  Avg checklist coverage: 9.3%
+  Avg accuracy score: 4.32/5
+  Avg clarity score: 3.74/5
+  Avg causality score: 4.01/5
+
+✅ Comprehensive RQ analysis saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/rq_analysis/rq_analysis_prehoc_c3.json
+✅ Markdown summary saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/rq_analysis/rq_analysis_prehoc_c3.md
+
+📊 Analyzing: vague_hints_c2_results.json
+
+================================================================================
+GENERATING COMPREHENSIVE RQ ANALYSIS REPORT
+================================================================================
+
+================================================================================
+RQ1: Theory-Guided Generation Effectiveness
+================================================================================
+
+Condition: unknown
+  Total cases: 97
+  Triple verification rate: 0.0%
+  Ground truth similarity: 100.0%
+  First attempt success rate: 0.0%
+
+================================================================================
+RQ2: Dual Verification Effectiveness
+================================================================================
+
+Incomplete patches detected: 0/97 (0.0%)
+
+Consistency violation breakdown:
+  causal_coverage: 0 cases
+  intervention_validity: 0 cases
+  logical_consistency: 0 cases
+  completeness: 0 cases
+
+Triple verification effectiveness:
+  Method: Triple Verification (V4)
+  Patches caught: 0
+  Note: Precision/Recall require manual validation of incomplete patches
+
+================================================================================
+RQ3: Scalability and Performance
+================================================================================
+
+================================================================================
+RQ4: Explanation Quality and Developer Trust
+================================================================================
+
+Explanation type: Dual Explanations (E_bug + E_patch)
+  Avg checklist coverage: 18.0%
+  Avg accuracy score: 4.15/5
+  Avg clarity score: 3.68/5
+  Avg causality score: 3.92/5
+
+✅ Comprehensive RQ analysis saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/rq_analysis/rq_analysis_vague_hints_c2.json
+✅ Markdown summary saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/rq_analysis/rq_analysis_vague_hints_c2.md
+
+✅ Comparative analysis saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/rq_analysis/rq_comparative_analysis.json
+
+================================================================================
+GENERATING FINAL REPORT
+================================================================================
+✅ Final report saved to: results/server1_results/deepseek-r1_1.5b_20251029_073801/EVALUATION_REPORT.md
+
+================================================================================
+✅ EVALUATION COMPLETE
+================================================================================
+Results directory: results/server1_results/deepseek-r1_1.5b_20251029_073801
+  - Raw results: results/server1_results/deepseek-r1_1.5b_20251029_073801/raw_results
+  - RQ analysis: results/server1_results/deepseek-r1_1.5b_20251029_073801/rq_analysis
+  - Final report: results/server1_results/deepseek-r1_1.5b_20251029_073801/EVALUATION_REPORT.md

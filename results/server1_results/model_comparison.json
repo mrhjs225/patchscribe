@@ -1,0 +1,19 @@
+{
+  "timestamp": "2025-10-29T12:15:28.473223",
+  "models": {
+    "deepseek-r1_1.5b": {
+      "directory": "results/server1_results/deepseek-r1_1.5b_20251029_073801",
+      "success_rate": 1.0,
+      "consistency_pass_rate": 0.6082474226804123,
+      "triple_verification_rate": 0.6082474226804123,
+      "total_cases": 97.0
+    },
+    "gpt-oss_20b": {
+      "directory": "results/server1_results/gpt-oss_20b_20251028_212158",
+      "success_rate": 1.0,
+      "consistency_pass_rate": 0.6701030927835051,
+      "triple_verification_rate": 0.6701030927835051,
+      "total_cases": 97.0
+    }
+  }
+}
