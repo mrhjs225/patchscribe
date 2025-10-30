@@ -304,6 +304,8 @@ def main():
                        choices=['c1', 'c2', 'c3', 'c4', 'all'],
                        default=['all'],
                        help='Which conditions to run (default: all)')
+    parser.add_argument('--limit', type=int,
+                       help='Limit number of cases to evaluate (useful for testing)')
     parser.add_argument('--skip-analysis', action='store_true',
                        help='Skip RQ analysis step')
     parser.add_argument('--llm-provider', type=str, default='ollama',
@@ -347,6 +349,12 @@ def main():
     # Load dataset
     try:
         cases = load_evaluation_cases(args.dataset)
+        
+        # Apply limit if specified
+        if args.limit and args.limit > 0:
+            original_count = len(cases)
+            cases = cases[:args.limit]
+            print(f"⚠️  Limited dataset from {original_count} to {len(cases)} cases")
     except Exception as e:
         print(f"❌ Error loading dataset: {e}")
         sys.exit(1)

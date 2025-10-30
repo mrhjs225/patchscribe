@@ -14,8 +14,6 @@ import argparse
 # Models to test (modify as needed)
 DEFAULT_MODELS = [
     "gpt-oss:20b",
-    "llama3.2:1b", 
-    "llama3.2:3b",
 ]
 
 
@@ -25,7 +23,8 @@ def run_evaluation_for_model(
     provider: str,
     output_base: Path,
     conditions: list = None,
-    endpoint: str = None
+    endpoint: str = None,
+    limit: int = None
 ) -> bool:
     """Run evaluation for a single model"""
     
@@ -56,6 +55,9 @@ def run_evaluation_for_model(
     
     if endpoint:
         cmd.extend(["--llm-endpoint", endpoint])
+    
+    if limit:
+        cmd.extend(["--limit", str(limit)])
     
     # Run evaluation
     log_file = output_dir / "evaluation.log"
@@ -193,6 +195,11 @@ def main():
         help='Which conditions to run (default: all)'
     )
     parser.add_argument(
+        '--limit',
+        type=int,
+        help='Limit number of cases to evaluate (useful for testing)'
+    )
+    parser.add_argument(
         '--skip-comparison',
         action='store_true',
         help='Skip final comparison report'
@@ -209,6 +216,8 @@ def main():
     print(f"Models: {', '.join(args.models)}")
     if args.conditions:
         print(f"Conditions: {', '.join(args.conditions)}")
+    if args.limit:
+        print(f"Case limit: {args.limit}")
     print("=" * 80)
     print()
     
@@ -224,7 +233,8 @@ def main():
             provider=args.provider,
             output_base=args.output,
             conditions=args.conditions,
-            endpoint=args.endpoint
+            endpoint=args.endpoint,
+            limit=args.limit
         )
         results[model] = success
         

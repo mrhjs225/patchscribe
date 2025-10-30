@@ -5,7 +5,7 @@ to provide complete, machine-checkable vulnerability specifications.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional
 
 from .intervention import InterventionSpec
@@ -21,6 +21,10 @@ class VariableSpec:
     meaning: str
     code_location: str
     domain: List[str] = field(default_factory=list)
+    
+    def as_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization"""
+        return asdict(self)
 
 
 @dataclass
@@ -30,6 +34,10 @@ class CausalPath:
     nodes: List[str]
     description: str
     
+    def as_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization"""
+        return asdict(self)
+    
 
 @dataclass
 class Assertion:
@@ -37,6 +45,10 @@ class Assertion:
     expression: str
     location: str
     description: str
+    
+    def as_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization"""
+        return asdict(self)
 
 
 @dataclass
@@ -65,6 +77,22 @@ class FormalBugExplanation:
     preconditions: List[str]
     postconditions: List[str]
     assertions: List[Assertion]
+    
+    def as_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            'formal_condition': self.formal_condition,
+            'variables': {k: v.as_dict() for k, v in self.variables.items()},
+            'description': self.description,
+            'manifestation': self.manifestation,
+            'vulnerable_location': self.vulnerable_location,
+            'causal_paths': [p.as_dict() for p in self.causal_paths],
+            'safety_property': self.safety_property,
+            'intervention_options': self.intervention_options,
+            'preconditions': self.preconditions,
+            'postconditions': self.postconditions,
+            'assertions': [a.as_dict() for a in self.assertions]
+        }
 
 
 @dataclass
@@ -73,6 +101,10 @@ class CodeDiff:
     added_lines: List[Dict[str, object]]
     modified_lines: List[Dict[str, object]]
     deleted_lines: List[Dict[str, object]]
+    
+    def as_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization"""
+        return asdict(self)
 
 
 @dataclass
@@ -81,6 +113,10 @@ class InterventionDescription:
     formal: str  # "do(Variable = value)"
     affected_variables: List[str]
     description: str
+    
+    def as_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization"""
+        return asdict(self)
 
 
 @dataclass
@@ -89,6 +125,10 @@ class EffectAnalysis:
     before: str  # Original V_bug condition
     after: str   # Modified condition
     reasoning: str
+    
+    def as_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization"""
+        return asdict(self)
 
 
 @dataclass
@@ -119,6 +159,22 @@ class FormalPatchExplanation:
     # Verification properties
     postconditions: List[str]
     new_assertions: List[str]
+    
+    def as_dict(self) -> Dict:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            'code_diff': self.code_diff.as_dict(),
+            'intervention': self.intervention.as_dict(),
+            'effect_on_Vbug': self.effect_on_Vbug.as_dict(),
+            'addressed_causes': self.addressed_causes,
+            'unaddressed_causes': self.unaddressed_causes,
+            'disrupted_paths': self.disrupted_paths,
+            'summary': self.summary,
+            'mechanism': self.mechanism,
+            'consequence': self.consequence,
+            'postconditions': self.postconditions,
+            'new_assertions': self.new_assertions
+        }
 
 
 def generate_E_bug(

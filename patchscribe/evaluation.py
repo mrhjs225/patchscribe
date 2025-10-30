@@ -162,8 +162,8 @@ class Evaluator:
                         "prompt_context": artifacts.explanations.prompt_context,
                         "llm_prompt": artifacts.explanations.llm_prompt,
                         # Add formal specifications (E_bug and E_patch)
-                        "E_bug": artifacts.E_bug.__dict__ if artifacts.E_bug else None,
-                        "E_patch": artifacts.E_patch.__dict__ if artifacts.E_patch else None,
+                        "E_bug": artifacts.E_bug.as_dict() if artifacts.E_bug else None,
+                        "E_patch": artifacts.E_patch.as_dict() if artifacts.E_patch else None,
                     },
                     explanation_metrics=explanation_metrics,
                     consistency=artifacts.consistency.as_dict() if artifacts.consistency else None,
