@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Multi-model evaluation runner for PatchScribe.
-Runs full RQ evaluation with multiple LLM models sequentially.
+Runs full RQ evaluation with multiple LLM models in parallel.
 """
 import subprocess
 import sys
@@ -9,11 +9,18 @@ from pathlib import Path
 from datetime import datetime
 import json
 import argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as mp
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
 
 
 # Models to test (modify as needed)
 DEFAULT_MODELS = [
-    "gpt-oss:20b",
+    "llama3.2:1b",
 ]
 
 
@@ -204,8 +211,22 @@ def main():
         action='store_true',
         help='Skip final comparison report'
     )
-    
+    parser.add_argument(
+        '--parallel',
+        action='store_true',
+        help='Run models in parallel (default: sequential)'
+    )
+    parser.add_argument(
+        '--max-parallel-models',
+        type=int,
+        default=min(4, mp.cpu_count() // 4),
+        help=f'Maximum number of models to run in parallel (default: {min(4, mp.cpu_count() // 4)})'
+    )
+
     args = parser.parse_args()
+    if args.provider.lower() == 'ollama' and args.parallel:
+        print("Warning: Ollama provider detected; disabling parallel model execution to avoid concurrent Ollama requests.")
+        args.parallel = False
     
     print("=" * 80)
     print("PATCHSCRIBE MULTI-MODEL EVALUATION")
@@ -218,29 +239,87 @@ def main():
         print(f"Conditions: {', '.join(args.conditions)}")
     if args.limit:
         print(f"Case limit: {args.limit}")
+    if args.parallel:
+        print(f"Parallel execution: YES (max {args.max_parallel_models} concurrent models)")
+    else:
+        print(f"Parallel execution: NO (sequential)")
     print("=" * 80)
     print()
-    
+
     # Create base output directory
     args.output.mkdir(parents=True, exist_ok=True)
-    
+
     # Run evaluation for each model
     results = {}
-    for model in args.models:
-        success = run_evaluation_for_model(
-            dataset=args.dataset,
-            model=model,
-            provider=args.provider,
-            output_base=args.output,
-            conditions=args.conditions,
-            endpoint=args.endpoint,
-            limit=args.limit
-        )
-        results[model] = success
-        
-        print("\nWaiting 5 seconds before next model...")
-        import time
-        time.sleep(5)
+
+    if args.parallel:
+        # Parallel execution
+        print(f"Running {len(args.models)} models in parallel (max {args.max_parallel_models} concurrent)...\n")
+
+        # 진행 상황 표시 설정
+        if tqdm is not None:
+            progress_bar = tqdm(
+                total=len(args.models),
+                desc="Model evaluation",
+                unit="model"
+            )
+        else:
+            progress_bar = None
+
+        with ProcessPoolExecutor(max_workers=args.max_parallel_models) as executor:
+            # Submit all model evaluations
+            future_to_model = {
+                executor.submit(
+                    run_evaluation_for_model,
+                    args.dataset,
+                    model,
+                    args.provider,
+                    args.output,
+                    args.conditions,
+                    args.endpoint,
+                    args.limit
+                ): model
+                for model in args.models
+            }
+
+            # Collect results as they complete
+            for future in as_completed(future_to_model):
+                model = future_to_model[future]
+                try:
+                    success = future.result()
+                    results[model] = success
+                    if progress_bar is not None:
+                        progress_bar.update(1)
+                        success_count = sum(1 for s in results.values() if s)
+                        progress_bar.set_postfix({"success": f"{success_count}/{len(results)}"})
+                    else:
+                        print(f"\n{'✅' if success else '❌'} Model {model} completed\n")
+                except Exception as e:
+                    results[model] = False
+                    if progress_bar is not None:
+                        progress_bar.update(1)
+                    else:
+                        print(f"\n❌ Model {model} failed with exception: {e}\n")
+
+        if progress_bar is not None:
+            progress_bar.close()
+    else:
+        # Sequential execution
+        for model in args.models:
+            success = run_evaluation_for_model(
+                dataset=args.dataset,
+                model=model,
+                provider=args.provider,
+                output_base=args.output,
+                conditions=args.conditions,
+                endpoint=args.endpoint,
+                limit=args.limit
+            )
+            results[model] = success
+
+            print("\nWaiting 5 seconds before next model...")
+            import time
+            time.sleep(5)
     
     # Generate comparison report
     if not args.skip_comparison:

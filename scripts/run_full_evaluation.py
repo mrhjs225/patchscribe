@@ -61,15 +61,16 @@ def run_baseline_evaluation(cases: List[Dict], output_dir: Path, config: Dict):
     print("\n" + "="*80)
     print("RQ1 - Condition C1: Baseline (post-hoc, no formal guidance)")
     print("="*80)
-    
+
     pipeline = PatchScribePipeline(
         strategy="only_natural",  # No formal guidance
         explain_mode="llm",
         enable_consistency_check=False,  # No verification
         enable_performance_profiling=False
     )
-    
-    evaluator = Evaluator(pipeline=pipeline)
+
+    max_workers = config.get('max_workers', None)
+    evaluator = Evaluator(pipeline=pipeline, max_workers=max_workers)
     report = evaluator.run(cases)
     
     # Save results
@@ -88,15 +89,16 @@ def run_vague_hints_evaluation(cases: List[Dict], output_dir: Path, config: Dict
     print("\n" + "="*80)
     print("RQ1 - Condition C2: Vague Hints (informal prompts)")
     print("="*80)
-    
+
     pipeline = PatchScribePipeline(
         strategy="natural",  # Natural language hints but not formal
         explain_mode="llm",
         enable_consistency_check=False,
         enable_performance_profiling=False
     )
-    
-    evaluator = Evaluator(pipeline=pipeline)
+
+    max_workers = config.get('max_workers', None)
+    evaluator = Evaluator(pipeline=pipeline, max_workers=max_workers)
     report = evaluator.run(cases)
     
     output_path = output_dir / 'vague_hints_c2_results.json'
@@ -114,15 +116,16 @@ def run_prehoc_guidance_evaluation(cases: List[Dict], output_dir: Path, config: 
     print("\n" + "="*80)
     print("RQ1 - Condition C3: Pre-hoc Guidance (E_bug without verification)")
     print("="*80)
-    
+
     pipeline = PatchScribePipeline(
         strategy="formal",  # Formal E_bug guidance
         explain_mode="both",
         enable_consistency_check=False,  # No verification yet
         enable_performance_profiling=False
     )
-    
-    evaluator = Evaluator(pipeline=pipeline)
+
+    max_workers = config.get('max_workers', None)
+    evaluator = Evaluator(pipeline=pipeline, max_workers=max_workers)
     report = evaluator.run(cases)
     
     output_path = output_dir / 'prehoc_c3_results.json'
@@ -140,15 +143,16 @@ def run_full_patchscribe_evaluation(cases: List[Dict], output_dir: Path, config:
     print("\n" + "="*80)
     print("RQ1 - Condition C4: Full PatchScribe (E_bug + triple verification)")
     print("="*80)
-    
+
     pipeline = PatchScribePipeline(
         strategy="formal",
         explain_mode="both",
         enable_consistency_check=True,  # Enable consistency checking
         enable_performance_profiling=True  # Enable for RQ3
     )
-    
-    evaluator = Evaluator(pipeline=pipeline)
+
+    max_workers = config.get('max_workers', None)
+    evaluator = Evaluator(pipeline=pipeline, max_workers=max_workers)
     report = evaluator.run(cases)
     
     output_path = output_dir / 'full_patchscribe_c4_results.json'
@@ -310,11 +314,13 @@ def main():
                        help='Skip RQ analysis step')
     parser.add_argument('--llm-provider', type=str, default='ollama',
                        help='LLM provider (default: ollama)')
-    parser.add_argument('--llm-model', type=str, default='gpt-oss:20b',
-                       help='LLM model name (default: gpt-oss:20b)')
+    parser.add_argument('--llm-model', type=str, default='llama3.2:1b',
+                       help='LLM model name (default: llama3.2:1b)')
     parser.add_argument('--llm-endpoint', type=str,
                        help='LLM endpoint URL (default: provider-specific)')
-    
+    parser.add_argument('--max-workers', type=int, default=None,
+                       help='Maximum parallel workers for case evaluation (default: CPU count)')
+
     args = parser.parse_args()
     
     # Set LLM environment variables from command line args
@@ -363,7 +369,8 @@ def main():
     config = {
         'llm_model': 'gpt-4',
         'max_iterations': 3,
-        'timeout': 300
+        'timeout': 300,
+        'max_workers': args.max_workers
     }
     
     # Run evaluations

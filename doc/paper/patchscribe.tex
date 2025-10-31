@@ -13,7 +13,7 @@
 \begin{document}
 \title{PatchScribe: Theory-Guided Vulnerability Repair with Dual Causal Explanations}
 
-\author{\IEEEauthorblockN{Anonymous Authors1}}
+\author{\IEEEauthorblockN{Anonymous Authors}}
 \maketitle
 \begin{abstract}
 Large Language Models (LLMs) can generate code patches for security
@@ -777,15 +777,15 @@ a check, vulnerability V is prevented (V=0) no matter the unsafe input.
 
 \textbf{In general, the SCM would consist of variables like:}
 
-\{X\_1,X\_2,\ldots,X\_k,C\_1,\ldots,C\_m,V\_``bug'' \}
+\(\{X_1, X_2, \ldots, X_k, C_1, \ldots, C_m, V_{\text{bug}}\}\)
 
-Where X are exogenous inputs (e.g., user-provided data, environment), C
-are internal conditions or flags (like B above), and V\_``bug'' is the
-bug outcome. Each C\_j has an equation C\_j \square (:=) f\_j (``Parents''
-(C\_j )) . The bug outcome has an equation V\_``bug'' \square (:=)
-f(``Parents'' (V\_``bug'' )) . Typically, f for V\_``bug'' will have a
-form indicating it triggers when a certain combination of conditions
-holds (e.g., a logical AND of cause conditions).
+Where \(X\) are exogenous inputs (e.g., user-provided data, environment), \(C\)
+are internal conditions or flags (like B above), and \(V_{\text{bug}}\) is the
+bug outcome. Each \(C_j\) is defined as \(f_j(\text{Parents}(C_j))\). The bug
+outcome has an equation \(V_{\text{bug}} = f(\text{Parents}(V_{\text{bug}}))\).
+Typically, \(f\) for \(V_{\text{bug}}\) will have a form indicating it triggers
+when a certain combination of conditions holds (e.g., a logical AND of cause
+conditions).
 
 Using the SCM for Patching: The SCM provides a formal way to evaluate a
 patch as an intervention. A patch that adds a check or alters logic is
@@ -909,8 +909,8 @@ specification from the PCG/SCM. This E\_bug explanation contains:}
 
 \begin{itemize}
     \item Option 1: Add bounds check (set Check = true)
-    \item Option 2: Clamp len to safe value ($ensure len \leq 256$)
-    \item Option 3: Use safe alternative ($memcpy \_ s$)
+    \item Option 2: Clamp len to a safe value (ensure \(len \leq 256\))
+    \item Option 3: Use a safe alternative (e.g., \texttt{memcpy\_s})
 \end{itemize}
 
 \begin{enumerate}
@@ -925,8 +925,8 @@ specification from the PCG/SCM. This E\_bug explanation contains:}
 \begin{itemize}
 \tightlist
 \item
-  Postcondition: len \leq  256 when line 42 is reached OR line 42 is
-  unreachable when len \textgreater{} 256
+  Postcondition: ensure \(len \leq 256\) when line 42 is reached, or confirm
+  that line 42 is unreachable whenever \(len > 256\)
 \end{itemize}
 
 This formal specification is then provided to the LLM as guidance for
@@ -982,9 +982,9 @@ intervenes on the causal model:}
 
 \begin{itemize}
 \item
-  Addressed: \{len \textgreater{} 256\}
+  Addressed: \(\{len > 256\}\)
 \item
-  Unaddressed: \{\lnot Check\} (justified because len is now safe)
+  Unaddressed: \(\{\lnot \text{Check}\}\) (justified because len is now safe)
 \end{itemize}
 
 \begin{enumerate}

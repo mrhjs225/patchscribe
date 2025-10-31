@@ -51,8 +51,8 @@ def main():
                        help='Dataset name (poc/zeroday) or path to JSON file')
     parser.add_argument('--llm-provider', type=str, default='ollama',
                        help='LLM provider (default: ollama)')
-    parser.add_argument('--llm-model', type=str, default='gpt-oss:20b',
-                       help='LLM model name (default: gpt-oss:20b)')
+    parser.add_argument('--llm-model', type=str, default='llama3.2:1b',
+                       help='LLM model name (default: llama3.2:1b)')
     parser.add_argument('--llm-endpoint', type=str,
                        help='LLM endpoint URL (default: provider-specific)')
     

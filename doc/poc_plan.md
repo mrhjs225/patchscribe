@@ -300,8 +300,8 @@ def generate_patch_with_explanation(code, E_bug, scm):
         
         # Step 2.2: LLM 패치 생성
         patch = LLMPatcher(
-            endpoint=PRIVATE_LLM_ENDPOINT,
-            model='openai/gpt-oss-120b'
+            endpoint=LOCAL_OLLAMA_ENDPOINT,
+            model='ollama/llama3.2:1b'
         ).generate(
             prompt=formal_prompt
         )

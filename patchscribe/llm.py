@@ -11,40 +11,41 @@ from urllib.parse import urljoin
 
 try:  # pragma: no cover - optional dependency
     import requests
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
 except Exception:  # pragma: no cover - networkless fallback
     requests = None
+    HTTPAdapter = None
+    Retry = None
 
 
 class LLMUnavailable(RuntimeError):
     """Raised when an LLM call is requested but configuration is missing."""
 
 
-DEFAULT_ENDPOINT = "http://115.145.135.227:7220/v1/chat/completions"
 DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434/api/chat"
+DEFAULT_OLLAMA_MODEL = "llama3.2:1b"
 
 
 @dataclass
 class LLMConfig:
-    provider: str = "openai"
+    provider: str = "ollama"
     endpoint: str | None = None
     api_key: str | None = None
-    model: str = "openai/gpt-oss-120b"
+    model: str = DEFAULT_OLLAMA_MODEL
     timeout: int = 60
 
     def __post_init__(self) -> None:
-        if not self.endpoint:
-            if self.provider == "ollama":
-                self.endpoint = DEFAULT_OLLAMA_ENDPOINT
-            else:
-                self.endpoint = DEFAULT_ENDPOINT
+        if not self.endpoint and self.provider == "ollama":
+            self.endpoint = DEFAULT_OLLAMA_ENDPOINT
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        provider = os.environ.get("PATCHSCRIBE_LLM_PROVIDER", "openai").lower()
+        provider = os.environ.get("PATCHSCRIBE_LLM_PROVIDER", "ollama").lower()
         endpoint = os.environ.get("PATCHSCRIBE_LLM_ENDPOINT")
         model = os.environ.get("PATCHSCRIBE_LLM_MODEL")
         if not model:
-            model = "llama3.2:1b" if provider == "ollama" else "openai/gpt-oss-120b"
+            model = DEFAULT_OLLAMA_MODEL if provider == "ollama" else ""
         return cls(
             provider=provider,
             endpoint=endpoint,
@@ -61,6 +62,47 @@ class LLMClient:
         self.config = config or LLMConfig.from_env()
         if self.config.provider == "ollama":
             self.config.model = self._normalize_ollama_model(self.config.model)
+
+        # Initialize session with connection pooling
+        self._session = self._create_session() if requests is not None else None
+
+    def _create_session(self):
+        """Create a requests session with connection pooling and retry logic"""
+        if requests is None:
+            return None
+
+        session = requests.Session()
+
+        # Configure retry strategy
+        if Retry is not None:
+            retry_strategy = Retry(
+                total=3,  # Maximum number of retries
+                backoff_factor=1,  # Wait 1, 2, 4 seconds between retries
+                status_forcelist=[429, 500, 502, 503, 504],  # Retry on these status codes
+                allowed_methods=["POST", "GET"],  # Allow retry on POST and GET
+            )
+        else:
+            retry_strategy = None
+
+        # Configure connection pooling
+        if HTTPAdapter is not None:
+            adapter = HTTPAdapter(
+                pool_connections=10,  # Number of connection pools to cache
+                pool_maxsize=20,  # Maximum connections to save in pool
+                max_retries=retry_strategy,
+            )
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+
+        return session
+
+    def __del__(self) -> None:
+        """Clean up session on deletion"""
+        if hasattr(self, '_session') and self._session is not None:
+            try:
+                self._session.close()
+            except Exception:
+                pass
 
     def available(self) -> bool:
         return bool(self.config.endpoint and requests is not None)
@@ -126,8 +168,12 @@ class LLMClient:
 
     def _post_chat(self, messages: List[Dict[str, str]], *, temperature: float) -> str:
         payload = self._build_payload(messages, temperature=temperature)
+
+        # Use session if available, otherwise fall back to requests module
+        http_client = self._session if self._session is not None else requests
+
         try:
-            response = requests.post(
+            response = http_client.post(
                 self.config.endpoint,
                 headers=self._headers(),
                 json=payload,
@@ -148,8 +194,12 @@ class LLMClient:
         tags_url = self._ollama_tags_url()
         if not tags_url:
             return model
+
+        # Use session if available, otherwise fall back to requests module
+        http_client = self._session if hasattr(self, '_session') and self._session is not None else requests
+
         try:
-            response = requests.get(tags_url, timeout=min(self.config.timeout, 10))
+            response = http_client.get(tags_url, timeout=min(self.config.timeout, 10))
             response.raise_for_status()
             data = response.json()
         except Exception:

@@ -3,6 +3,7 @@ High-level orchestration of the PatchScribe proof-of-concept workflow.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Dict, List
 
@@ -24,7 +25,12 @@ from .formal_spec import (
 from .intervention import InterventionSpec, InterventionPlanner, refine_intervention
 from .patch import PatchGenerator, PatchResult
 from .pcg_builder import PCGBuilder, PCGBuilderConfig
-from .performance import PerformanceProfiler, PerformanceProfile, measure_code_complexity
+from .performance import (
+    PerformanceProfiler,
+    PerformanceProfile,
+    measure_code_complexity,
+    categorize_complexity,
+)
 from .scm import SCMBuilder
 from .verification import VerificationResult, Verifier
 
@@ -82,24 +88,20 @@ class PatchScribePipeline:
         
         # Initialize profiler
         profiler = PerformanceProfiler() if self.enable_performance_profiling else None
+        code_complexity = None
         if profiler:
             profiler.start_total()
             code_complexity = measure_code_complexity(program)
         
         # Phase 1: Vulnerability Formalization
-        if profiler:
-            phase1_context = profiler.profile_phase("phase1_formalization")
-            phase1_context.__enter__()
-        
-        pcg, diagnostics = PCGBuilder(program, vuln_info, self.config).build()
-        scm = SCMBuilder(pcg).derive()
-        intervention = InterventionPlanner(pcg, scm).compute()
-        
-        # Generate E_bug (Formal Bug Explanation)
-        E_bug = generate_E_bug(pcg, scm, intervention, vuln_info)
-        
-        if profiler:
-            phase1_context.__exit__(None, None, None)
+        phase1_context = profiler.profile_phase("phase1_formalization") if profiler else nullcontext()
+        with phase1_context:
+            pcg, diagnostics = PCGBuilder(program, vuln_info, self.config).build()
+            scm = SCMBuilder(pcg).derive()
+            intervention = InterventionPlanner(pcg, scm).compute()
+            
+            # Generate E_bug (Formal Bug Explanation)
+            E_bug = generate_E_bug(pcg, scm, intervention, vuln_info)
         
         iterations: List[Dict[str, object]] = []
         spec = intervention
@@ -117,56 +119,48 @@ class PatchScribePipeline:
         elif self.strategy in {"natural", "only_natural"}:
             natural_context = build_natural_context(pcg, scm, intervention)
         
-        # Phase 2: Theory-Guided Patch Generation with iteration
-        if profiler:
-            phase2_context = profiler.profile_phase("phase2_generation")
-            phase2_context.__enter__()
-        
+        # Phase 2 & 3: Iterative generation and verification
         for iteration_idx in range(max_iterations):
-            patch = PatchGenerator(
-                pcg,
-                program,
-                vuln_case["vuln_line"],
-                vuln_case.get("signature", ""),
-                strategy=self.strategy,
-                natural_context=natural_context if self.strategy != "minimal" else None,
-            ).generate(spec)
+            generation_ctx = profiler.profile_phase("phase2_generation") if profiler else nullcontext()
+            with generation_ctx:
+                patch = PatchGenerator(
+                    pcg,
+                    program,
+                    vuln_case["vuln_line"],
+                    vuln_case.get("signature", ""),
+                    strategy=self.strategy,
+                    natural_context=natural_context if self.strategy != "minimal" else None,
+                ).generate(spec)
+                
+                effect = self.effect_analyzer.analyze(
+                    original_condition=scm.vulnerable_condition,
+                    patched_code=patch.patched_code,
+                    signature=vuln_case.get("signature", ""),
+                )
+                effect_dict = effect.as_dict()
+                
+                # Generate E_patch (Formal Patch Explanation)
+                E_patch = generate_E_patch(
+                    patch.patched_code,
+                    patch.diff,
+                    E_bug,
+                    pcg,
+                    scm,
+                    effect_dict
+                )
             
-            effect = self.effect_analyzer.analyze(
-                original_condition=scm.vulnerable_condition,
-                patched_code=patch.patched_code,
-                signature=vuln_case.get("signature", ""),
-            )
-            effect_dict = effect.as_dict()
-            
-            # Generate E_patch (Formal Patch Explanation)
-            E_patch = generate_E_patch(
-                patch.patched_code,
-                patch.diff,
-                E_bug,
-                pcg,
-                scm,
-                effect_dict
-            )
-            
-            # Phase 3: Dual Verification
-            if profiler and iteration_idx == 0:
-                phase3_context = profiler.profile_phase("phase3_verification")
-                phase3_context.__enter__()
-            
-            verifier = Verifier(
-                vuln_case.get("signature", ""),
-                original_code=program,
-                vuln_line=vuln_case.get("vuln_line"),
-            )
-            verification = verifier.verify(patch, expected_condition=scm.vulnerable_condition)
-            
-            # Consistency checking
-            if self.consistency_checker:
-                consistency = self.consistency_checker.check(E_bug, E_patch)
-            
-            if profiler and iteration_idx == 0:
-                phase3_context.__exit__(None, None, None)
+            verification_ctx = profiler.profile_phase("phase3_verification") if profiler else nullcontext()
+            with verification_ctx:
+                verifier = Verifier(
+                    vuln_case.get("signature", ""),
+                    original_code=program,
+                    vuln_line=vuln_case.get("vuln_line"),
+                )
+                verification = verifier.verify(patch, expected_condition=scm.vulnerable_condition)
+                
+                # Consistency checking
+                if self.consistency_checker:
+                    consistency = self.consistency_checker.check(E_bug, E_patch)
             
             # Record first attempt success
             if iteration_idx == 0:
@@ -215,10 +209,6 @@ class PatchScribePipeline:
                 natural_context = build_prompt_context(pcg, scm, spec)
             elif self.strategy in {"natural", "only_natural"}:
                 natural_context = build_natural_context(pcg, scm, spec)
-        
-        # End Phase 2 profiling
-        if profiler:
-            phase2_context.__exit__(None, None, None)
         
         if patch is None or verification is None or effect_dict is None:
             raise RuntimeError("Patch pipeline did not produce results")
@@ -284,11 +274,19 @@ class PatchScribePipeline:
         
         # End performance profiling
         if profiler:
-            case_id = vuln_case.get("id", "unknown")
+            if code_complexity is not None:
+                loc = code_complexity.get("lines_of_code", 0)
+                code_complexity["complexity_bucket"] = categorize_complexity(loc)
+            case_id = (
+                vuln_case.get("id")
+                or vuln_case.get("case_id")
+                or vuln_case.get("filename")
+                or "unknown"
+            )
             performance_profile = profiler.end_total(
                 case_id=case_id,
                 iteration_count=len(iterations),
-                code_complexity=None  # TODO: Add code complexity metrics
+                code_complexity=code_complexity,
             )
         else:
             performance_profile = None

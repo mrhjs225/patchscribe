@@ -92,7 +92,7 @@ python -m patchscribe.cli \
 
 ### Ollama를 사용한 로컬 LLM 실험
 
-[Ollama](https://ollama.com/)를 통해 대체 경량 모델(예: Qwen, LLaMA, DeepSeek, Gemma, GPT-OSS)을 
+[Ollama](https://ollama.com/)를 통해 대체 경량 모델(예: Qwen, LLaMA, DeepSeek, Gemma)을 
 시도할 수 있습니다. Ollama 데몬이 로컬에서 실행 중인지 확인하고(`ollama serve`), 
 다음과 같이 몇 가지 모델을 가져옵니다(24GB GPU 환경 기준):
 
@@ -105,7 +105,7 @@ python -m patchscribe.cli \
 
 ```
 export PATCHSCRIBE_LLM_PROVIDER=ollama
-# 예제 모델: qwen3:0.6b, DeepSeek-R1:1.5b, gemma3:1b, gpt-oss:20b, Llama3.2:1b
+# 예제 모델: qwen3:0.6b, DeepSeek-R1:1.5b, gemma3:1b, Llama3.2:1b
 export PATCHSCRIBE_LLM_MODEL=Llama3.2:1b
 # Ollama가 기본 포트에서 실행되는 경우 선택 사항:
 export PATCHSCRIBE_LLM_ENDPOINT=http://127.0.0.1:11434/api/chat
@@ -120,16 +120,13 @@ python -m patchscribe.cli \
     --llm-provider ollama --llm-model Llama3.2:1b
 ```
 
-가져온 로컬 모델(예: `qwen3:0.6b`, `DeepSeek-R1:1.5b`, `gemma3:1b`, `gpt-oss:20b`, `Llama3.2:1b`)로 `--llm-model` 값을 
+가져온 로컬 모델(예: `qwen3:0.6b`, `DeepSeek-R1:1.5b`, `gemma3:1b`, `Llama3.2:1b`)로 `--llm-model` 값을 
 변경하여 응답을 비교할 수 있습니다. 필요한 경우 `--llm-timeout`으로 초 단위 타임아웃을 조정하세요.
 Ollama의 HTTP API는 모델 이름 대소문자를 구분하므로 `ollama list`에 표시된 표기와 동일하게 지정해야 합니다.
 
 설명용 LLM 프롬프트에 추가 지시를 전달하려면 `--explanation-prompt` 또는
 `--explanation-prompt-file`을 사용할 수 있습니다. 두 옵션을 함께 쓰면 텍스트가 결합되어
 LLM 프롬프트 마지막에 덧붙습니다.
-
-> 참고: `gpt-oss:20b` 모델은 최신 Ollama 릴리스를 요구합니다. 풀 단계에서 오류가 발생하면
-> [Ollama 다운로드 페이지](https://ollama.com/download)에서 클라이언트를 업데이트한 뒤 다시 시도하세요.
 
 `run.py` 스크립트는 기본 전략(minimal/formal/natural)을 한 번에 실행하는 단순 래퍼입니다.
 

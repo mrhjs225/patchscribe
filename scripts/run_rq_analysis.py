@@ -5,31 +5,44 @@ Analyzes results from evaluation runs and produces comprehensive RQ-specific rep
 """
 import json
 import sys
-from pathlib import Path
-from typing import Dict, List, Any
+from collections import Counter, defaultdict
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 import statistics
 
 # Add patchscribe to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from patchscribe.performance import categorize_complexity, measure_code_complexity
 
 
 @dataclass
 class RQ1Result:
     """Results for RQ1: Theory-Guided Generation Effectiveness"""
     condition: str
+    total_cases: int
+    success_rate: float
+    expected_success_rate: float
     triple_verification_rate: float
     ground_truth_similarity: float
     first_attempt_success_rate: float
-    total_cases: int
+    consistency_pass_rate: float
+    verification_pass_rate: float
+    vulnerability_elimination_rate: float
     
     def as_dict(self) -> Dict:
         return {
             'condition': self.condition,
+            'total_cases': self.total_cases,
+            'success_rate': self.success_rate,
+            'expected_success_rate': self.expected_success_rate,
             'triple_verification_rate': self.triple_verification_rate,
             'ground_truth_similarity': self.ground_truth_similarity,
             'first_attempt_success_rate': self.first_attempt_success_rate,
-            'total_cases': self.total_cases
+            'consistency_pass_rate': self.consistency_pass_rate,
+            'verification_pass_rate': self.verification_pass_rate,
+            'vulnerability_elimination_rate': self.vulnerability_elimination_rate
         }
 
 
@@ -41,6 +54,7 @@ class RQ2Result:
     precision: float
     recall: float
     consistency_violations: Dict[str, int]
+    verification_stage_stats: Dict[str, Dict[str, Any]]
     
     def as_dict(self) -> Dict:
         return {
@@ -48,7 +62,8 @@ class RQ2Result:
             'incomplete_patches_caught': self.incomplete_patches_caught,
             'precision': self.precision,
             'recall': self.recall,
-            'consistency_violations': self.consistency_violations
+            'consistency_violations': self.consistency_violations,
+            'verification_stage_stats': self.verification_stage_stats
         }
 
 
@@ -56,13 +71,14 @@ class RQ2Result:
 class RQ3Result:
     """Results for RQ3: Scalability and Performance"""
     complexity_level: str
-    avg_phase1_time: float
-    avg_phase2_time: float
-    avg_phase3_time: float
-    avg_total_time: float
-    avg_iterations: float
-    peak_memory_mb: float
     case_count: int
+    avg_iterations: float
+    avg_phase1_time: Optional[float] = None
+    avg_phase2_time: Optional[float] = None
+    avg_phase3_time: Optional[float] = None
+    avg_total_time: Optional[float] = None
+    peak_memory_mb: Optional[float] = None
+    avg_loc: Optional[float] = None
     
     def as_dict(self) -> Dict:
         return {
@@ -73,7 +89,8 @@ class RQ3Result:
             'avg_total_time': self.avg_total_time,
             'avg_iterations': self.avg_iterations,
             'peak_memory_mb': self.peak_memory_mb,
-            'case_count': self.case_count
+            'case_count': self.case_count,
+            'avg_loc': self.avg_loc
         }
 
 
@@ -85,6 +102,7 @@ class RQ4Result:
     avg_accuracy_score: float
     avg_clarity_score: float
     avg_causality_score: float
+    missing_item_frequency: Dict[str, int]
     
     def as_dict(self) -> Dict:
         return {
@@ -92,7 +110,8 @@ class RQ4Result:
             'checklist_coverage': self.checklist_coverage,
             'avg_accuracy_score': self.avg_accuracy_score,
             'avg_clarity_score': self.avg_clarity_score,
-            'avg_causality_score': self.avg_causality_score
+            'avg_causality_score': self.avg_causality_score,
+            'missing_item_frequency': self.missing_item_frequency
         }
 
 
@@ -105,6 +124,109 @@ class RQAnalyzer:
             self.data = json.load(f)
         self.cases = self.data.get('cases', [])
         self.metrics = self.data.get('metrics', {})
+        
+        stem = self.results_path.stem
+        if stem.endswith('_results'):
+            stem = stem[:-len('_results')]
+        self.condition_key = stem
+        self.condition_label = self._resolve_condition_label(stem)
+        
+        self.dataset_dirs = [
+            d for d in (self.results_path.parents[2] / 'datasets').glob('*')
+            if d.is_dir()
+        ] if len(self.results_path.parents) >= 3 and (self.results_path.parents[2] / 'datasets').exists() else [
+            d for d in Path('datasets').glob('*') if d.is_dir()
+        ]
+        self._case_source_cache: Dict[str, Optional[Path]] = {}
+    
+    @staticmethod
+    def _resolve_condition_label(condition_key: str) -> str:
+        """Return a human-readable label for the condition key."""
+        mapping = {
+            'baseline_c1': 'C1 Baseline (post-hoc, no formal guidance)',
+            'vague_hints_c2': 'C2 Vague Hints (informal prompts)',
+            'prehoc_c3': 'C3 Pre-hoc Guidance (formal spec, no verification)',
+            'full_patchscribe_c4': 'C4 Full PatchScribe (formal spec + triple verification)',
+        }
+        return mapping.get(condition_key, condition_key or 'Unknown')
+    
+    @staticmethod
+    def _is_triple_verification_pass(case: Dict[str, Any]) -> bool:
+        """Determine whether triple verification succeeded for the case."""
+        verification = case.get('verification', {})
+        return all(
+            verification.get(stage, {}).get('success', False)
+            for stage in ('symbolic', 'model_check', 'fuzzing')
+        )
+    
+    @staticmethod
+    def _categorize_stage_failure(details: Optional[str]) -> str:
+        """Categorize a verification failure message into a coarse bucket."""
+        if not details:
+            return 'unspecified'
+        
+        details_lower = details.lower()
+        if 'compilation failed' in details_lower or 'expected' in details_lower and 'error' in details_lower:
+            return 'compile_error'
+        if 'no guard' in details_lower:
+            return 'missing_causal_guard'
+        if 'no fail-fast' in details_lower:
+            return 'missing_fail_fast'
+        if 'timeout' in details_lower:
+            return 'timeout'
+        if 'solver' in details_lower or 'unsat' in details_lower:
+            return 'solver_failure'
+        return 'other'
+    
+    def _find_case_source(self, case_id: str) -> Optional[Path]:
+        """Locate the source file for a case across known dataset directories."""
+        if case_id in self._case_source_cache:
+            return self._case_source_cache[case_id]
+        
+        for dataset_dir in self.dataset_dirs:
+            candidate = dataset_dir / case_id
+            if candidate.exists():
+                self._case_source_cache[case_id] = candidate
+                return candidate
+        
+        self._case_source_cache[case_id] = None
+        return None
+    
+    def _extract_complexity_metrics(self, case: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Measure LOC and complexity category for a case if source is available."""
+        case_id = case.get('case_id')
+        if not case_id:
+            return None
+        
+        source_path = self._find_case_source(case_id)
+        if not source_path:
+            return None
+        
+        if source_path.is_dir():
+            # Prefer vulnerable file if present, fall back to first source file
+            candidates = [
+                source_path / name for name in ('vul.c', 'vul.cpp', 'vulnerable.c', 'buggy.c')
+            ]
+            candidates += sorted(source_path.glob('*.c')) + sorted(source_path.glob('*.cpp'))
+            code_path = next((cand for cand in candidates if cand.exists()), None)
+        else:
+            code_path = source_path
+        
+        if not code_path or not code_path.exists():
+            return None
+        
+        try:
+            code = code_path.read_text(encoding='utf-8', errors='ignore')
+        except OSError:
+            return None
+        
+        complexity = measure_code_complexity(code)
+        loc = complexity.get('lines_of_code', 0)
+        return {
+            'loc': loc,
+            'complexity_bucket': categorize_complexity(loc),
+            'metrics': complexity
+        }
     
     def analyze_rq1(self) -> List[RQ1Result]:
         """
@@ -120,64 +242,59 @@ class RQAnalyzer:
         print("RQ1: Theory-Guided Generation Effectiveness")
         print("="*80)
         
-        # Group cases by strategy/condition
-        conditions = {}
-        for case in self.cases:
-            # Infer condition from case metadata or iterations
-            # For now, we'll use a simplified approach
-            strategy = case.get('strategy', 'unknown')
-            if strategy not in conditions:
-                conditions[strategy] = []
-            conditions[strategy].append(case)
+        total_cases = len(self.cases)
+        if total_cases == 0:
+            print("No cases found in results file.")
+            return []
         
-        results = []
-        for condition_name, condition_cases in conditions.items():
-            if not condition_cases:
-                continue
-            
-            # Calculate metrics
-            triple_verif_count = sum(
-                1 for c in condition_cases 
-                if c.get('actual_success', False) 
-                and c.get('consistency', {}).get('overall', False)
-            )
-            triple_verif_rate = triple_verif_count / len(condition_cases) if condition_cases else 0.0
-            
-            ground_truth_matches = sum(
-                1 for c in condition_cases
-                if c.get('patch', {}).get('matches_ground_truth', False)
-            )
-            gt_similarity = ground_truth_matches / len(condition_cases) if condition_cases else 0.0
-            
-            first_attempt_successes = sum(
-                1 for c in condition_cases
-                if c.get('first_attempt_success', False)
-            )
-            first_attempt_rate = first_attempt_successes / len(condition_cases) if condition_cases else 0.0
-            
-            result = RQ1Result(
-                condition=condition_name,
-                triple_verification_rate=triple_verif_rate,
-                ground_truth_similarity=gt_similarity,
-                first_attempt_success_rate=first_attempt_rate,
-                total_cases=len(condition_cases)
-            )
-            results.append(result)
-            
-            print(f"\nCondition: {condition_name}")
-            print(f"  Total cases: {result.total_cases}")
-            print(f"  Triple verification rate: {result.triple_verification_rate:.1%}")
-            print(f"  Ground truth similarity: {result.ground_truth_similarity:.1%}")
-            print(f"  First attempt success rate: {result.first_attempt_success_rate:.1%}")
+        success_count = sum(1 for case in self.cases if case.get('actual_success', False))
+        expected_success_count = sum(1 for case in self.cases if case.get('expected_success', False))
+        triple_pass_count = sum(1 for case in self.cases if self._is_triple_verification_pass(case))
+        consistency_pass_count = sum(
+            1 for case in self.cases
+            if case.get('consistency', {}).get('overall', False)
+        )
+        verification_pass_count = sum(
+            1 for case in self.cases
+            if case.get('verification', {}).get('overall', False)
+        )
+        ground_truth_matches = sum(
+            1 for case in self.cases
+            if case.get('patch', {}).get('matches_ground_truth', False)
+        )
+        first_attempt_successes = sum(
+            1 for case in self.cases
+            if case.get('first_attempt_success', False)
+        )
+        vulnerability_eliminated = sum(
+            1 for case in self.cases
+            if case.get('effect', {}).get('vulnerability_removed', False)
+        )
         
-        # Calculate improvement
-        if len(results) > 1:
-            baseline_rate = min(r.triple_verification_rate for r in results)
-            best_rate = max(r.triple_verification_rate for r in results)
-            improvement = ((best_rate - baseline_rate) / baseline_rate * 100) if baseline_rate > 0 else 0
-            print(f"\n  Improvement over baseline: {improvement:.1f}%")
+        result = RQ1Result(
+            condition=self.condition_label,
+            total_cases=total_cases,
+            success_rate=success_count / total_cases,
+            expected_success_rate=expected_success_count / total_cases,
+            triple_verification_rate=triple_pass_count / total_cases,
+            ground_truth_similarity=ground_truth_matches / total_cases,
+            first_attempt_success_rate=first_attempt_successes / total_cases,
+            consistency_pass_rate=consistency_pass_count / total_cases,
+            verification_pass_rate=verification_pass_count / total_cases,
+            vulnerability_elimination_rate=vulnerability_eliminated / total_cases
+        )
         
-        return results
+        print(f"\nCondition: {result.condition}")
+        print(f"  Total cases: {result.total_cases}")
+        print(f"  Success rate: {result.success_rate:.1%} (expected {result.expected_success_rate:.1%})")
+        print(f"  Triple verification rate: {result.triple_verification_rate:.1%}")
+        print(f"  Consistency pass rate: {result.consistency_pass_rate:.1%}")
+        print(f"  Verification (all stages) pass rate: {result.verification_pass_rate:.1%}")
+        print(f"  Ground truth match rate: {result.ground_truth_similarity:.1%}")
+        print(f"  First attempt success rate: {result.first_attempt_success_rate:.1%}")
+        print(f"  Vulnerability elimination rate: {result.vulnerability_elimination_rate:.1%}")
+        
+        return [result]
     
     def analyze_rq2(self) -> List[RQ2Result]:
         """
@@ -193,50 +310,88 @@ class RQAnalyzer:
         print("RQ2: Dual Verification Effectiveness")
         print("="*80)
         
-        # Analyze consistency violations
-        violation_types = {
-            'causal_coverage': 0,
-            'intervention_validity': 0,
-            'logical_consistency': 0,
-            'completeness': 0
-        }
+        total_cases = len(self.cases)
+        if total_cases == 0:
+            print("No cases found for RQ2 analysis.")
+            return []
         
+        violation_pass_fail = {
+            'causal_coverage': {'pass': 0, 'fail': 0},
+            'intervention_validity': {'pass': 0, 'fail': 0},
+            'logical_consistency': {'pass': 0, 'fail': 0},
+            'completeness': {'pass': 0, 'fail': 0}
+        }
+        stage_stats: Dict[str, Dict[str, Any]] = {
+            stage: {'pass': 0, 'fail': 0, 'reasons': Counter()}
+            for stage in ('symbolic', 'model_check', 'fuzzing')
+        }
         incomplete_patches = []
+        
         for case in self.cases:
-            consistency = case.get('consistency')
+            consistency = case.get('consistency', {})
+            verification = case.get('verification', {})
+            
             if consistency and not consistency.get('overall', True):
                 incomplete_patches.append(case)
+            
+            for dimension, counts in violation_pass_fail.items():
+                outcome = consistency.get(dimension, {})
+                if outcome.get('success', False):
+                    counts['pass'] += 1
+                elif outcome:
+                    counts['fail'] += 1
+            
+            for stage, stats in stage_stats.items():
+                stage_result = verification.get(stage)
+                if not stage_result:
+                    continue
                 
-                # Count violation types
-                if not consistency.get('causal_coverage', {}).get('success', True):
-                    violation_types['causal_coverage'] += 1
-                if not consistency.get('intervention_validity', {}).get('success', True):
-                    violation_types['intervention_validity'] += 1
-                if not consistency.get('logical_consistency', {}).get('success', True):
-                    violation_types['logical_consistency'] += 1
-                if not consistency.get('completeness', {}).get('success', True):
-                    violation_types['completeness'] += 1
+                if stage_result.get('success', False):
+                    stats['pass'] += 1
+                else:
+                    stats['fail'] += 1
+                    reason = self._categorize_stage_failure(stage_result.get('details'))
+                    stats['reasons'][reason] += 1
         
-        # Calculate metrics
-        total_cases = len(self.cases)
         incomplete_caught = len(incomplete_patches)
         
-        # For precision/recall, we need ground truth about incomplete patches
-        # In real evaluation, this would come from manual review or variant exploits
-        # For now, we'll report what we caught
+        print(f"\nIncomplete patches flagged by consistency checker: "
+              f"{incomplete_caught}/{total_cases} ({incomplete_caught/total_cases:.1%})")
+        print("\nConsistency sub-check outcomes:")
+        for dimension, counts in violation_pass_fail.items():
+            print(f"  {dimension}: {counts['fail']} fail / {counts['pass']} pass")
         
-        print(f"\nIncomplete patches detected: {incomplete_caught}/{total_cases} ({incomplete_caught/total_cases:.1%})")
-        print(f"\nConsistency violation breakdown:")
-        for vtype, count in violation_types.items():
-            print(f"  {vtype}: {count} cases")
+        print("\nVerification stage outcomes:")
+        for stage, stats in stage_stats.items():
+            total_stage = stats['pass'] + stats['fail']
+            pass_rate = stats['pass'] / total_stage if total_stage else 0.0
+            print(f"  {stage}: {stats['pass']} pass / {stats['fail']} fail "
+                  f"({pass_rate:.1%} success)")
+            if stats['reasons']:
+                reason_summary = ', '.join(
+                    f"{reason}: {count}" for reason, count in stats['reasons'].most_common()
+                )
+                print(f"    Failure reasons: {reason_summary}")
         
-        # Create result for triple verification
+        consistency_violation_counts = {
+            dimension: counts['fail']
+            for dimension, counts in violation_pass_fail.items()
+        }
+        
         result = RQ2Result(
             verification_method="Triple Verification (V4)",
             incomplete_patches_caught=incomplete_caught,
             precision=0.0,  # Would be calculated from manual review
             recall=0.0,     # Would be calculated from manual review
-            consistency_violations=violation_types
+            consistency_violations=consistency_violation_counts,
+            verification_stage_stats={
+                stage: {
+                    'pass': stats['pass'],
+                    'fail': stats['fail'],
+                    'failure_reasons': dict(stats['reasons'])
+                }
+                for stage, stats in stage_stats.items()
+            }
         )
         
         print(f"\nTriple verification effectiveness:")
@@ -259,89 +414,95 @@ class RQAnalyzer:
         print("RQ3: Scalability and Performance")
         print("="*80)
         
-        # Group cases by complexity
-        complexity_groups = {
-            'simple': [],
-            'medium': [],
-            'complex': []
-        }
+        if not self.cases:
+            print("No cases available for RQ3 analysis.")
+            return []
+        
+        complexity_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        unknown_cases = 0
         
         for case in self.cases:
-            # Try to infer complexity from case data
-            # This would typically come from code analysis
-            case_id = case.get('case_id', '')
+            perf = case.get('performance') or {}
+            complexity_info = perf.get('code_complexity')
+            if not complexity_info:
+                complexity_info = self._extract_complexity_metrics(case)
+            iteration_count = perf.get('iteration_count')
+            if iteration_count is None:
+                iteration_count = len(case.get('iterations', []))
+            phase_breakdown = perf.get('phase_breakdown', {}) if perf else {}
             
-            # For now, categorize based on available performance data
-            perf = case.get('performance')
-            if not perf:
-                continue
+            record = {
+                'iteration_count': iteration_count,
+                'phase1_time': phase_breakdown.get('phase1_formalization'),
+                'phase2_time': phase_breakdown.get('phase2_generation'),
+                'phase3_time': phase_breakdown.get('phase3_verification'),
+                'total_time': perf.get('total_time_seconds') if perf else None,
+                'peak_memory': perf.get('peak_memory_mb') if perf else None,
+                'phase_memory': perf.get('phase_memory_mb') if perf else None,
+                'loc': None
+            }
             
-            # Estimate complexity from total time (rough heuristic)
-            total_time = perf.get('total_time_seconds', 0)
-            if total_time < 120:  # < 2 min
-                complexity_groups['simple'].append(case)
-            elif total_time < 180:  # 2-3 min
-                complexity_groups['medium'].append(case)
+            if complexity_info:
+                record['loc'] = complexity_info.get('lines_of_code') or complexity_info.get('loc')
+                bucket = (
+                    complexity_info.get('complexity_bucket')
+                    or complexity_info.get('bucket')
+                    or complexity_info.get('category')
+                    or 'unknown'
+                )
             else:
-                complexity_groups['complex'].append(case)
+                bucket = 'unknown'
+
+            if bucket == 'unknown' and record['loc'] is not None:
+                bucket = categorize_complexity(int(record['loc']))
+            
+            complexity_groups[bucket].append(record)
+            if bucket == 'unknown':
+                unknown_cases += 1
         
-        results = []
-        for complexity, cases in complexity_groups.items():
-            if not cases:
+        results: List[RQ3Result] = []
+        for complexity, entries in sorted(complexity_groups.items()):
+            if not entries:
                 continue
             
-            # Extract performance metrics
-            phase1_times = []
-            phase2_times = []
-            phase3_times = []
-            total_times = []
-            iterations = []
-            memory_values = []
+            def safe_mean(values: List[Optional[float]]) -> Optional[float]:
+                filtered = [v for v in values if v is not None]
+                return statistics.mean(filtered) if filtered else None
             
-            for case in cases:
-                perf = case.get('performance', {})
-                if not perf:
-                    continue
-                
-                phase_breakdown = perf.get('phase_breakdown', {})
-                phase1_times.append(phase_breakdown.get('phase1_formalization', 0))
-                phase2_times.append(phase_breakdown.get('phase2_generation', 0))
-                phase3_times.append(phase_breakdown.get('phase3_verification', 0))
-                total_times.append(perf.get('total_time_seconds', 0))
-                iterations.append(perf.get('iteration_count', 0))
-                
-                mem = perf.get('peak_memory_mb')
-                if mem:
-                    memory_values.append(mem)
+            avg_iterations = safe_mean([entry['iteration_count'] for entry in entries]) or 0.0
+            avg_phase1 = safe_mean([entry['phase1_time'] for entry in entries])
+            avg_phase2 = safe_mean([entry['phase2_time'] for entry in entries])
+            avg_phase3 = safe_mean([entry['phase3_time'] for entry in entries])
+            avg_total = safe_mean([entry['total_time'] for entry in entries])
+            avg_memory = safe_mean([entry['peak_memory'] for entry in entries])
+            avg_loc = safe_mean([entry['loc'] for entry in entries])
             
-            # Calculate averages
             result = RQ3Result(
                 complexity_level=complexity,
-                avg_phase1_time=statistics.mean(phase1_times) if phase1_times else 0,
-                avg_phase2_time=statistics.mean(phase2_times) if phase2_times else 0,
-                avg_phase3_time=statistics.mean(phase3_times) if phase3_times else 0,
-                avg_total_time=statistics.mean(total_times) if total_times else 0,
-                avg_iterations=statistics.mean(iterations) if iterations else 0,
-                peak_memory_mb=statistics.mean(memory_values) if memory_values else 0,
-                case_count=len(cases)
+                case_count=len(entries),
+                avg_iterations=avg_iterations,
+                avg_phase1_time=avg_phase1,
+                avg_phase2_time=avg_phase2,
+                avg_phase3_time=avg_phase3,
+                avg_total_time=avg_total,
+                peak_memory_mb=avg_memory,
+                avg_loc=avg_loc
             )
             results.append(result)
             
-            print(f"\nComplexity: {complexity}")
+            print(f"\nComplexity bucket: {complexity}")
             print(f"  Cases: {result.case_count}")
-            print(f"  Avg Phase 1 (Formalization): {result.avg_phase1_time:.2f}s")
-            print(f"  Avg Phase 2 (Generation): {result.avg_phase2_time:.2f}s")
-            print(f"  Avg Phase 3 (Verification): {result.avg_phase3_time:.2f}s")
-            print(f"  Avg Total Time: {result.avg_total_time:.2f}s")
-            print(f"  Avg Iterations: {result.avg_iterations:.1f}")
-            if result.peak_memory_mb > 0:
-                print(f"  Peak Memory: {result.peak_memory_mb:.2f} MB")
-        
-        # Overall statistics
-        if results:
-            all_total_times = [r.avg_total_time for r in results]
-            overall_avg = statistics.mean(all_total_times)
-            print(f"\nOverall average time: {overall_avg:.2f}s ({overall_avg/60:.2f} min)")
+            print(f"  Avg iterations: {result.avg_iterations:.1f}")
+            if result.avg_loc is not None:
+                print(f"  Avg LOC: {result.avg_loc:.1f}")
+            if result.avg_total_time is not None:
+                print(f"  Avg total time: {result.avg_total_time:.2f}s")
+            else:
+                print("  Avg total time: N/A (performance metrics not captured)")
+            
+        if unknown_cases:
+            print(f"\n⚠️  Source files not found for {unknown_cases} case(s); "
+                  "classified under 'unknown' complexity.")
         
         return results
     
@@ -362,6 +523,7 @@ class RQAnalyzer:
         accuracy_scores = []
         clarity_scores = []
         causality_scores = []
+        missing_counter: Counter[str] = Counter()
         
         for case in self.cases:
             metrics = case.get('explanation_metrics', {})
@@ -378,13 +540,18 @@ class RQAnalyzer:
                     clarity_scores.append(llm_scores['clarity'])
                 if 'causality' in llm_scores:
                     causality_scores.append(llm_scores['causality'])
+            
+            missing_items = metrics.get('missing_items')
+            if missing_items:
+                missing_counter.update(missing_items)
         
         result = RQ4Result(
             explanation_type="Dual Explanations (E_bug + E_patch)",
             checklist_coverage=statistics.mean(checklist_coverages) if checklist_coverages else 0,
             avg_accuracy_score=statistics.mean(accuracy_scores) if accuracy_scores else 0,
             avg_clarity_score=statistics.mean(clarity_scores) if clarity_scores else 0,
-            avg_causality_score=statistics.mean(causality_scores) if causality_scores else 0
+            avg_causality_score=statistics.mean(causality_scores) if causality_scores else 0,
+            missing_item_frequency=dict(missing_counter)
         )
         
         print(f"\nExplanation type: {result.explanation_type}")
@@ -395,6 +562,11 @@ class RQAnalyzer:
             print(f"  Avg causality score: {result.avg_causality_score:.2f}/5")
         else:
             print(f"  Note: LLM quality scores not available (requires manual evaluation)")
+        if result.missing_item_frequency:
+            missing_summary = ', '.join(
+                f"{item}: {count}" for item, count in Counter(result.missing_item_frequency).most_common()
+            )
+            print(f"  Frequent missing checklist items: {missing_summary}")
         
         return [result]
     
@@ -450,9 +622,14 @@ class RQAnalyzer:
             lines.extend([
                 f"### Condition: {result['condition']}",
                 f"- Total cases: {result['total_cases']}",
+                f"- Success rate: {result['success_rate']:.1%}",
+                f"- Expected success rate: {result['expected_success_rate']:.1%}",
                 f"- Triple verification rate: {result['triple_verification_rate']:.1%}",
-                f"- Ground truth similarity: {result['ground_truth_similarity']:.1%}",
+                f"- Consistency pass rate: {result['consistency_pass_rate']:.1%}",
+                f"- Verification success rate: {result['verification_pass_rate']:.1%}",
+                f"- Ground truth match rate: {result['ground_truth_similarity']:.1%}",
                 f"- First attempt success rate: {result['first_attempt_success_rate']:.1%}",
+                f"- Vulnerability elimination rate: {result['vulnerability_elimination_rate']:.1%}",
                 ""
             ])
         
@@ -472,6 +649,19 @@ class RQAnalyzer:
             ])
             for vtype, count in result['consistency_violations'].items():
                 lines.append(f"- {vtype}: {count} cases")
+            stage_stats = result.get('verification_stage_stats', {})
+            if stage_stats:
+                lines.append("")
+                lines.append("**Verification stage outcomes:**")
+                for stage, stats in stage_stats.items():
+                    lines.append(f"- {stage}: {stats['pass']} pass / {stats['fail']} fail")
+                    reasons = stats.get('failure_reasons', {})
+                    if reasons:
+                        reason_summary = ', '.join(
+                            f"{reason} ({count})"
+                            for reason, count in Counter(reasons).most_common()
+                        )
+                        lines.append(f"  - Failure reasons: {reason_summary}")
             lines.append("")
         
         lines.extend([
@@ -482,17 +672,27 @@ class RQAnalyzer:
         ])
         
         for result in report['rq3_scalability_performance']:
-            lines.extend([
+            entries = [
                 f"### Complexity: {result['complexity_level']}",
                 f"- Cases: {result['case_count']}",
-                f"- Avg Phase 1 (Formalization): {result['avg_phase1_time']:.2f}s",
-                f"- Avg Phase 2 (Generation): {result['avg_phase2_time']:.2f}s",
-                f"- Avg Phase 3 (Verification): {result['avg_phase3_time']:.2f}s",
-                f"- **Avg Total Time**: {result['avg_total_time']:.2f}s",
                 f"- Avg Iterations: {result['avg_iterations']:.1f}",
-                f"- Peak Memory: {result['peak_memory_mb']:.2f} MB",
-                ""
-            ])
+            ]
+            if result.get('avg_loc') is not None:
+                entries.append(f"- Avg LOC: {result['avg_loc']:.1f}")
+            for label, key, unit in [
+                ("Avg Phase 1 (Formalization)", 'avg_phase1_time', 's'),
+                ("Avg Phase 2 (Generation)", 'avg_phase2_time', 's'),
+                ("Avg Phase 3 (Verification)", 'avg_phase3_time', 's'),
+                ("**Avg Total Time**", 'avg_total_time', 's'),
+                ("Peak Memory", 'peak_memory_mb', 'MB')
+            ]:
+                value = result.get(key)
+                if value is None:
+                    entries.append(f"- {label}: N/A")
+                else:
+                    entries.append(f"- {label}: {value:.2f}{unit}")
+            entries.append("")
+            lines.extend(entries)
         
         lines.extend([
             "## RQ4: Explanation Quality",
@@ -512,6 +712,13 @@ class RQAnalyzer:
                     f"- Clarity score: {result['avg_clarity_score']:.2f}/5",
                     f"- Causality score: {result['avg_causality_score']:.2f}/5",
                 ])
+            missing_items = result.get('missing_item_frequency', {})
+            if missing_items:
+                missing_summary = ', '.join(
+                    f"{item} ({count})"
+                    for item, count in Counter(missing_items).most_common()
+                )
+                lines.append(f"- Frequent missing checklist items: {missing_summary}")
             lines.append("")
         
         lines.extend([

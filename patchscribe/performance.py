@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 try:
     import psutil
@@ -31,6 +31,7 @@ class PerformanceProfile:
     phase_breakdown: Dict[str, float]
     iteration_count: int
     peak_memory_mb: float | None = None
+    phase_memory_mb: Dict[str, float] | None = None
     code_complexity: Dict[str, object] | None = None
     
     def as_dict(self) -> Dict[str, object]:
@@ -42,6 +43,8 @@ class PerformanceProfile:
         }
         if self.peak_memory_mb is not None:
             result['peak_memory_mb'] = self.peak_memory_mb
+        if self.phase_memory_mb:
+            result['phase_memory_mb'] = self.phase_memory_mb
         if self.code_complexity is not None:
             result['code_complexity'] = self.code_complexity
         return result
@@ -96,16 +99,24 @@ class PerformanceProfiler:
             raise ValueError("Must call start_total() and end_total() before get_profile()")
         
         total_time = self.total_end - self.total_start
+        phase_breakdown: Dict[str, float] = {}
+        phase_memory: Dict[str, float] = {}
+        for phase in self.phases:
+            phase_breakdown[phase.phase_name] = phase_breakdown.get(phase.phase_name, 0.0) + phase.duration_seconds
+            if phase.peak_memory_mb is not None:
+                phase_memory[phase.phase_name] = max(
+                    phase_memory.get(phase.phase_name, 0.0),
+                    phase.peak_memory_mb,
+                )
         
-        phase_breakdown = {
-            phase.phase_name: phase.duration_seconds
-            for phase in self.phases
-        }
-        
-        peak_memory = None
+        peak_memory: Optional[float] = None
         if self.process and self.initial_memory is not None:
             current_memory = self.process.memory_info().rss
             peak_memory = (current_memory - self.initial_memory) / (1024 * 1024)  # MB
+            if phase_memory:
+                peak_memory = max(peak_memory or 0.0, max(phase_memory.values()))
+        elif phase_memory:
+            peak_memory = max(phase_memory.values())
         
         return PerformanceProfile(
             case_id=case_id,
@@ -113,6 +124,7 @@ class PerformanceProfiler:
             phase_breakdown=phase_breakdown,
             iteration_count=iteration_count,
             peak_memory_mb=peak_memory,
+            phase_memory_mb=phase_memory or None,
             code_complexity=code_complexity
         )
     
@@ -145,7 +157,7 @@ class _PhaseContext:
         peak_memory = None
         if self.profiler.process and self.start_memory is not None:
             end_memory = self.profiler.process.memory_info().rss
-            peak_memory = (end_memory - self.start_memory) / (1024 * 1024)  # MB
+            peak_memory = max(0.0, (end_memory - self.start_memory) / (1024 * 1024))
         
         metrics = PhaseMetrics(
             phase_name=self.phase_name,
