@@ -20,46 +20,77 @@ def merge_results(server_dirs: List[Path], output_dir: Path):
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 각 조건별로 병합
-    for condition in ['c1', 'c2', 'c3', 'c4']:
-        print(f"\nMerging condition: {condition}")
+    # 모든 모델 찾기
+    models = set()
+    for server_dir in server_dirs:
+        model_dirs = [d for d in server_dir.iterdir() if d.is_dir()]
+        models.update(d.name for d in model_dirs)
 
-        merged_cases = []
+    if not models:
+        print("⚠️  No model subdirectories found, using root directory")
+        models = {'_root'}
 
-        for server_dir in server_dirs:
-            result_files = list(server_dir.glob(f'{condition}_server*_results.json'))
+    print(f"\nFound models: {sorted(models)}")
 
-            for result_file in result_files:
-                if not result_file.exists():
+    # 각 모델별로 병합
+    for model in sorted(models):
+        print(f"\n{'='*60}")
+        print(f"MODEL: {model}")
+        print(f"{'='*60}")
+
+        model_output_dir = output_dir / model if model != '_root' else output_dir
+        model_output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 각 조건별로 병합
+        for condition in ['c1', 'c2', 'c3', 'c4']:
+            print(f"\n  Merging condition: {condition}")
+
+            merged_cases = []
+
+            for server_dir in server_dirs:
+                # 모델별 디렉토리 확인
+                if model == '_root':
+                    search_dir = server_dir
+                else:
+                    search_dir = server_dir / model
+
+                if not search_dir.exists():
                     continue
 
-                print(f"  Reading: {result_file.name}")
-                with open(result_file, 'r') as f:
-                    data = json.load(f)
+                result_files = list(search_dir.glob(f'{condition}_server*_results.json'))
 
-                cases = data.get('cases', [])
-                merged_cases.extend(cases)
-                print(f"    Added {len(cases)} cases")
+                for result_file in result_files:
+                    if not result_file.exists():
+                        continue
 
-        if not merged_cases:
-            print(f"  ⚠️  No results found for {condition}")
-            continue
+                    print(f"    Reading: {result_file.relative_to(server_dir.parent)}")
+                    with open(result_file, 'r') as f:
+                        data = json.load(f)
 
-        # 메트릭 재계산
-        metrics = _recalculate_metrics(merged_cases)
+                    cases = data.get('cases', [])
+                    merged_cases.extend(cases)
+                    print(f"      Added {len(cases)} cases")
 
-        # 저장
-        output_file = output_dir / f'{condition}_merged_results.json'
-        merged_result = {
-            'cases': merged_cases,
-            'metrics': metrics
-        }
+            if not merged_cases:
+                print(f"    ⚠️  No results found for {condition}")
+                continue
 
-        with open(output_file, 'w') as f:
-            json.dump(merged_result, f, indent=2)
+            # 메트릭 재계산
+            metrics = _recalculate_metrics(merged_cases)
 
-        print(f"  ✅ {condition}: {len(merged_cases)} cases, "
-              f"success rate: {metrics.get('success_rate', 0):.1%}")
+            # 저장
+            output_file = model_output_dir / f'{condition}_merged_results.json'
+            merged_result = {
+                'cases': merged_cases,
+                'metrics': metrics,
+                'model': model
+            }
+
+            with open(output_file, 'w') as f:
+                json.dump(merged_result, f, indent=2)
+
+            print(f"    ✅ {condition}: {len(merged_cases)} cases, "
+                  f"success rate: {metrics.get('success_rate', 0):.1%}")
 
     # 불완전 패치 병합
     print("\nMerging incomplete patches...")

@@ -200,7 +200,7 @@ cat results/evaluation_full/EVALUATION_REPORT.md
 ### 여러 서버 (분산 실행) ⚡
 
 ```bash
-# 1. 각 서버에서 실행 (모든 조건 C1-C4 자동 실행)
+# 1. 각 서버에서 실행 (모든 모델 × 모든 조건 C1-C4 자동 실행)
 # Server 0:
 ./run_server.sh 0 4 20 zeroday
 
@@ -222,9 +222,15 @@ scp -r user@server3:~/patchscribe/results/server3 results/
 # 3. 결과 병합
 python3 scripts/merge_results.py --results-dir results --output results/merged
 
-# 4. RQ 분석
-python3 scripts/run_rq_analysis.py results/merged/c4_merged_results.json
+# 4. RQ 분석 (모델별로)
+python3 scripts/run_rq_analysis.py results/merged/llama3.2:1b/c4_merged_results.json
+python3 scripts/run_rq_analysis.py results/merged/llama3.2:3b/c4_merged_results.json
+python3 scripts/run_rq_analysis.py results/merged/qwen2.5-coder:7b/c4_merged_results.json
 ```
+
+**참고**:
+- 테스트할 모델 리스트는 `run_server.sh` 파일 상단에서 수정 가능
+- 각 서버는 할당된 데이터에 대해 모든 모델과 조건을 자동으로 실험
 
 **상세 가이드**: [DISTRIBUTED_GUIDE.md](DISTRIBUTED_GUIDE.md) 참고
 

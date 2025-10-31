@@ -1,6 +1,6 @@
 #!/bin/bash
 # PatchScribe 분산 실험 실행 스크립트
-# 각 서버가 할당된 데이터에 대해 모든 조건(C1-C4)을 실험
+# 각 서버가 할당된 데이터에 대해 모든 모델과 모든 조건(C1-C4)을 실험
 
 set -e
 
@@ -9,6 +9,27 @@ SERVER_ID=${1}
 NUM_SERVERS=${2}
 TOTAL_CASES=${3}
 DATASET=${4:-zeroday}
+
+# 테스트할 모델 리스트 (필요에 따라 수정)
+MODELS=(
+    "ollama:qwen3:14b"
+    "ollama:qwen3:14b"
+    "ollama:qwen3:8b"
+    "ollama:qwen3:4b"
+    "ollama:qwen3:1.7b"
+    "ollama:gemma3:12b"
+    "ollama:gemma3:4b"
+    "ollama:gemma3:270m"
+    "ollama:deepseek-r1:14b"
+    "ollama:deepseek-r1:8b"
+    "ollama:deepseek-r1:7b"
+    "ollama:llama3.2:3b"
+    "ollama:llama3.2:1b"
+    "ollama:gpt-oss:20b"
+    "ollama:gemma3:1b"
+    "ollama:deepseek-r1:1.5b"
+    "ollama:qwen3:0.6b"
+)
 
 if [ -z "$SERVER_ID" ] || [ -z "$NUM_SERVERS" ] || [ -z "$TOTAL_CASES" ]; then
     echo "Usage: $0 <SERVER_ID> <NUM_SERVERS> <TOTAL_CASES> [DATASET]"
@@ -21,6 +42,8 @@ if [ -z "$SERVER_ID" ] || [ -z "$NUM_SERVERS" ] || [ -z "$TOTAL_CASES" ]; then
     echo "  NUM_SERVERS  : Total number of servers"
     echo "  TOTAL_CASES  : Total number of cases in dataset"
     echo "  DATASET      : Dataset name (default: zeroday)"
+    echo ""
+    echo "Models to test: ${MODELS[@]}"
     exit 1
 fi
 
@@ -30,6 +53,7 @@ echo "========================================"
 echo "Total servers: $NUM_SERVERS"
 echo "Total cases: $TOTAL_CASES"
 echo "Dataset: $DATASET"
+echo "Models: ${MODELS[@]}"
 echo ""
 
 # 케이스 할당 계산
@@ -71,29 +95,48 @@ EOF
 
 echo ""
 echo "========================================"
-echo "  Running All Conditions (C1-C4)"
+echo "  Running All Models × All Conditions"
 echo "========================================"
 
-# 모든 조건 실행
-for CONDITION in c1 c2 c3 c4; do
+# 모든 모델에 대해 실험
+for MODEL_SPEC in "${MODELS[@]}"; do
+    # 모델 정보 파싱 (provider:model)
+    IFS=':' read -r PROVIDER MODEL_NAME <<< "$MODEL_SPEC"
+
     echo ""
-    echo ">>> Starting Condition: $CONDITION"
+    echo "###################################"
+    echo "  MODEL: $MODEL_NAME (Provider: $PROVIDER)"
+    echo "###################################"
 
-    # 조건별 설정
-    case $CONDITION in
-        c1) STRATEGY="only_natural"; CONSISTENCY="False" ;;
-        c2) STRATEGY="natural"; CONSISTENCY="False" ;;
-        c3) STRATEGY="formal"; CONSISTENCY="False" ;;
-        c4) STRATEGY="formal"; CONSISTENCY="True" ;;
-    esac
+    # 모델별 결과 디렉토리
+    MODEL_OUTPUT_DIR="$OUTPUT_DIR/$MODEL_NAME"
+    mkdir -p $MODEL_OUTPUT_DIR
 
-    # 평가 실행
-    python3 << EOF
+    # 모든 조건 실행
+    for CONDITION in c1 c2 c3 c4; do
+        echo ""
+        echo ">>> Starting: $MODEL_NAME - Condition $CONDITION"
+
+        # 조건별 설정
+        case $CONDITION in
+            c1) STRATEGY="only_natural"; CONSISTENCY="False" ;;
+            c2) STRATEGY="natural"; CONSISTENCY="False" ;;
+            c3) STRATEGY="formal"; CONSISTENCY="False" ;;
+            c4) STRATEGY="formal"; CONSISTENCY="True" ;;
+        esac
+
+        # 평가 실행
+        python3 << EOF
 import json
 import sys
+import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd()))
+
+# 모델 설정
+os.environ['PATCHSCRIBE_LLM_PROVIDER'] = '$PROVIDER'
+os.environ['PATCHSCRIBE_LLM_MODEL'] = '$MODEL_NAME'
 
 from patchscribe.pipeline import PatchScribePipeline
 from patchscribe.evaluation import Evaluator
@@ -102,7 +145,7 @@ from patchscribe.evaluation import Evaluator
 with open('$OUTPUT_DIR/assigned_cases.json', 'r') as f:
     cases = json.load(f)
 
-print(f"Running $CONDITION on {len(cases)} cases...")
+print(f"Running $MODEL_NAME - $CONDITION on {len(cases)} cases...")
 
 # 파이프라인 설정
 enable_consistency = $CONSISTENCY == "True"
@@ -118,16 +161,20 @@ evaluator = Evaluator(pipeline=pipeline)
 report = evaluator.run(cases)
 
 # 결과 저장
-output_file = Path('$OUTPUT_DIR/${CONDITION}_server${SERVER_ID}_results.json')
+output_file = Path('$MODEL_OUTPUT_DIR/${CONDITION}_server${SERVER_ID}_results.json')
 output_file.parent.mkdir(parents=True, exist_ok=True)
 
 with open(output_file, 'w') as f:
     json.dump(report.as_dict(), f, indent=2)
 
-print(f"✅ $CONDITION complete: Success rate {report.metrics.get('success_rate', 0):.1%}")
+print(f"✅ $MODEL_NAME - $CONDITION complete: Success rate {report.metrics.get('success_rate', 0):.1%}")
 EOF
 
-    echo "✅ Condition $CONDITION completed"
+        echo "✅ Condition $CONDITION completed"
+    done
+
+    echo ""
+    echo "✅ Model $MODEL_NAME completed"
 done
 
 echo ""

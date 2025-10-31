@@ -8,15 +8,16 @@
 
 ### 핵심 개념
 - **각 서버는 할당된 데이터만 처리**
+- **모든 모델(llama3.2:1b, 3b, qwen2.5-coder 등)을 자동으로 실험**
 - **모든 조건(C1-C4)을 자동으로 실험**
 - **결과를 중앙에서 병합**
 
-### 예시: 4대 서버, 20개 케이스
+### 예시: 4대 서버, 20개 케이스, 3개 모델
 ```
-Server 0: Cases 0-4   (5개) → C1, C2, C3, C4 모두 실험
-Server 1: Cases 5-9   (5개) → C1, C2, C3, C4 모두 실험
-Server 2: Cases 10-14 (5개) → C1, C2, C3, C4 모두 실험
-Server 3: Cases 15-19 (5개) → C1, C2, C3, C4 모두 실험
+Server 0: Cases 0-4   (5개) × 3 models × 4 conditions = 60 실험
+Server 1: Cases 5-9   (5개) × 3 models × 4 conditions = 60 실험
+Server 2: Cases 10-14 (5개) × 3 models × 4 conditions = 60 실험
+Server 3: Cases 15-19 (5개) × 3 models × 4 conditions = 60 실험
 ```
 
 ### 성능 향상
@@ -38,7 +39,22 @@ print(f'Total cases: {len(cases)}')
 "
 ```
 
-### 2단계: 각 서버에서 실행
+### 2단계: 모델 설정 (선택 사항)
+
+`run_server.sh` 스크립트 상단에서 테스트할 모델 리스트를 수정할 수 있습니다:
+
+```bash
+# run_server.sh 파일 내용
+MODELS=(
+    "ollama:llama3.2:1b"
+    "ollama:llama3.2:3b"
+    "ollama:qwen2.5-coder:7b"
+)
+```
+
+각 모델은 자동으로 Ollama에서 다운로드됩니다.
+
+### 3단계: 각 서버에서 실행
 
 모든 서버에서 **동일한 명령어**를 실행하되, **SERVER_ID만 다르게** 지정합니다.
 
@@ -69,7 +85,9 @@ print(f'Total cases: {len(cases)}')
 ./run_server.sh 3 4 20 zeroday
 ```
 
-### 3단계: 결과 수집
+각 서버는 할당된 데이터에 대해 **모든 모델 × 모든 조건(C1-C4)**을 자동으로 실험합니다.
+
+### 4단계: 결과 수집
 
 각 서버의 `results/server<ID>/` 디렉토리를 중앙 서버로 복사:
 
@@ -90,7 +108,7 @@ scp -r user@central:~/patchscribe/results/server3 results/
 # 별도 복사 불필요
 ```
 
-### 4단계: 결과 병합
+### 5단계: 결과 병합
 
 ```bash
 # 중앙 서버에서 실행
@@ -103,43 +121,48 @@ python3 scripts/merge_results.py --results-dir results --output results/merged
 MERGING RESULTS FROM ALL SERVERS
 ================================================================================
 
-Merging condition: c1
-  Reading: c1_server0_results.json
-    Added 5 cases
-  Reading: c1_server1_results.json
-    Added 5 cases
-  Reading: c1_server2_results.json
-    Added 5 cases
-  Reading: c1_server3_results.json
-    Added 5 cases
-  ✅ c1: 20 cases, success rate: 35.0%
+Found models: ['llama3.2:1b', 'llama3.2:3b', 'qwen2.5-coder:7b']
 
-Merging condition: c2
+============================================================
+MODEL: llama3.2:1b
+============================================================
+
+  Merging condition: c1
+    Reading: server0/llama3.2:1b/c1_server0_results.json
+      Added 5 cases
+    Reading: server1/llama3.2:1b/c1_server1_results.json
+      Added 5 cases
+    ...
+    ✅ c1: 20 cases, success rate: 35.0%
+
+  Merging condition: c2
+    ...
+
+============================================================
+MODEL: llama3.2:3b
+============================================================
   ...
 
 ✅ MERGE COMPLETE
 Results saved to: results/merged/
 ```
 
-### 5단계: RQ 분석
+### 6단계: RQ 분석
+
+각 모델과 조건별로 분석:
 
 ```bash
-# 각 조건별 분석
+# 특정 모델, 특정 조건 분석
 python3 scripts/run_rq_analysis.py \
-    results/merged/c1_merged_results.json \
-    -o results/analysis/rq_c1.json
+    results/merged/llama3.2:1b/c4_merged_results.json \
+    -o results/analysis/llama3.2_1b_c4.json
 
-python3 scripts/run_rq_analysis.py \
-    results/merged/c2_merged_results.json \
-    -o results/analysis/rq_c2.json
-
-python3 scripts/run_rq_analysis.py \
-    results/merged/c3_merged_results.json \
-    -o results/analysis/rq_c3.json
-
-python3 scripts/run_rq_analysis.py \
-    results/merged/c4_merged_results.json \
-    -o results/analysis/rq_c4.json
+# 또는 모든 모델 비교
+for model in llama3.2:1b llama3.2:3b qwen2.5-coder:7b; do
+    python3 scripts/run_rq_analysis.py \
+        results/merged/$model/c4_merged_results.json \
+        -o results/analysis/${model}_c4.json
+done
 ```
 
 ---
@@ -150,10 +173,15 @@ python3 scripts/run_rq_analysis.py \
 results/
 ├── server0/
 │   ├── assigned_cases.json
-│   ├── c1_server0_results.json
-│   ├── c2_server0_results.json
-│   ├── c3_server0_results.json
-│   ├── c4_server0_results.json
+│   ├── llama3.2:1b/
+│   │   ├── c1_server0_results.json
+│   │   ├── c2_server0_results.json
+│   │   ├── c3_server0_results.json
+│   │   └── c4_server0_results.json
+│   ├── llama3.2:3b/
+│   │   └── (동일 구조)
+│   ├── qwen2.5-coder:7b/
+│   │   └── (동일 구조)
 │   └── incomplete_patches_server0.json
 ├── server1/
 │   └── (동일 구조)
@@ -162,10 +190,15 @@ results/
 ├── server3/
 │   └── (동일 구조)
 └── merged/
-    ├── c1_merged_results.json          ← 모든 서버 C1 결과 병합
-    ├── c2_merged_results.json          ← 모든 서버 C2 결과 병합
-    ├── c3_merged_results.json          ← 모든 서버 C3 결과 병합
-    ├── c4_merged_results.json          ← 모든 서버 C4 결과 병합
+    ├── llama3.2:1b/
+    │   ├── c1_merged_results.json      ← 모든 서버 C1 결과 병합
+    │   ├── c2_merged_results.json
+    │   ├── c3_merged_results.json
+    │   └── c4_merged_results.json
+    ├── llama3.2:3b/
+    │   └── (동일 구조)
+    ├── qwen2.5-coder:7b/
+    │   └── (동일 구조)
     └── incomplete_patches_merged.json  ← 모든 불완전 패치 병합
 ```
 
