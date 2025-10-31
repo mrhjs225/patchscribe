@@ -15,7 +15,7 @@ PatchScribe는 취약점에 대한 인과적 설명을 구축하고, LLM 기반 
 │   ├── dataset.py             # poc/zeroday 데이터셋 로더
 │   ├── pipeline.py            # 엔드투엔드 오케스트레이션
 │   ├── patch.py               # LLM 가이드 패치 합성 (formal/natural/minimal)
-│   ├── verification.py        # 기호/모델/퍼징 에뮬레이션
+│   ├── verification.py        # 기호/모델/퍼징 검증 (KLEE/CBMC/LibFuzzer + 휴리스틱 폴백)
 │   ├── explanation.py         # 형식적 + 자연어 설명 생성기
 │   ├── cli.py                 # 커맨드라인 진입점
 │   └── evaluation.py          # 집계 메트릭 및 보고서
@@ -81,9 +81,10 @@ python -m patchscribe.cli \
     --output results/zeroday_formal.md --format markdown
 ```
 
-### 자동 메트릭
+### 자동 메트릭 및 GPT 평가
 
-집계 메트릭(성공률, 정답 일치 등)을 평가합니다:
+집계 메트릭(성공률, 정답 일치 등)을 평가합니다. GPT API를 구성하면 패치 안정성(GPT 점수)과
+설명 품질(정확성/명확성/인과성)을 자동으로 수집합니다:
 ```
 python -m patchscribe.cli \
     --dataset zeroday --limit 20 --strategy formal \
@@ -148,8 +149,7 @@ LLM 프롬프트 마지막에 덧붙습니다.
 
 - ✅ APPATCH zeroday 데이터셋에 대한 패치/설명 번들을 생성하는 엔드투엔드 PoC 파이프라인
 - ✅ 프롬프트 컨텍스트가 있는 전환 가능한 LLM 전략 (minimal/formal/natural)
-- ✅ 수동 검토를 위한 자동 메트릭(정답 diff, 검증 결과) 및 Markdown 보고서
-- ⚠️ 선택적 도구 통합(clang, angr, CBMC 등)은 실제 바이너리 대기 중인 스텁
+- ✅ 수동/자동 검토를 위한 메트릭 + Markdown 보고서 (KLEE/CBMC/LibFuzzer 기반 삼중 검증 및 GPT 점수 포함)
 - ⚠️ 베이스라인 전략(`raw_gpt4`, `vrpilot` 등)에는 구체적인 프롬프트 정의가 필요
 
 전체 연구 계획 및 남은 작업에 대해서는 `poc_plan_clean.md`를 참조하세요.

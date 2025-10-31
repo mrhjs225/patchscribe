@@ -1,0 +1,233 @@
+# PatchScribe 빠른 시작 가이드
+
+## 📚 전체 실험 실행하기
+
+논문의 모든 RQ(Research Questions)를 검증하기 위한 완전한 가이드입니다.
+
+---
+
+## 🚀 가장 빠른 시작 (30초)
+
+### 옵션 1: 빠른 테스트 (10분)
+```bash
+# 3개 케이스만으로 파이프라인이 동작하는지 테스트
+./quick_test.sh
+```
+
+### 옵션 2: 전체 실험 (2-3시간)
+```bash
+# 10개 케이스로 모든 RQ 실험 실행
+./run_all_experiments.sh 2>&1 | tee experiment_log.txt
+```
+
+---
+
+## 📖 상세 가이드
+
+### 1️⃣ 환경 준비
+
+```bash
+# Python 버전 확인 (3.8 이상 필요)
+python3 --version
+
+# LLM 설정 (로컬 모델 사용 시)
+export PATCHSCRIBE_LLM_PROVIDER=ollama
+export PATCHSCRIBE_LLM_MODEL=llama3.2:1b
+
+# Ollama 시작 및 모델 다운로드
+ollama serve  # 별도 터미널에서
+ollama pull llama3.2:1b
+```
+
+### 2️⃣ 단계별 실행
+
+#### Step 1: RQ1 - Theory-Guided Generation (60분)
+```bash
+# C1, C2, C3, C4 모든 조건 평가
+python3 scripts/run_full_evaluation.py zeroday \
+    --conditions c1 c2 c3 c4 \
+    --limit 10 \
+    --output results/evaluation_full
+```
+
+#### Step 2: RQ2 - Incomplete Patches 생성 (2분)
+```bash
+# 각 취약점당 2-3개의 불완전 패치 생성
+python3 scripts/inject_incomplete_patches.py \
+    --dataset zeroday \
+    --limit 10 \
+    --output results/incomplete_patches
+```
+
+#### Step 3: RQ2 - Verification Ablation (90분)
+```bash
+# V1, V2, V3, V4 검증 방법 비교
+python3 scripts/run_verification_ablation.py \
+    --dataset zeroday \
+    --limit 10 \
+    --incomplete-patches results/incomplete_patches/incomplete_patches_zeroday.json \
+    --output results/verification_ablation
+```
+
+#### Step 4: 결과 분석
+```bash
+# 각 조건에 대한 RQ 분석
+python3 scripts/run_rq_analysis.py \
+    results/evaluation_full/raw_results/full_patchscribe_c4_results.json \
+    -o results/rq_analysis/rq_analysis.json
+
+# 최종 보고서 확인
+cat results/evaluation_full/EVALUATION_REPORT.md
+```
+
+---
+
+## 📊 결과 확인
+
+### 빠른 요약
+```bash
+# 모든 조건의 성공률 확인
+for file in results/evaluation_full/raw_results/*_results.json; do
+    echo "=== $(basename $file) ==="
+    python3 -c "
+import json
+with open('$file') as f:
+    data = json.load(f)
+    print(f\"Success rate: {data['metrics']['success_rate']:.1%}\")
+"
+done
+```
+
+### 상세 결과 위치
+```
+results/
+├── evaluation_full/
+│   ├── raw_results/              # RQ1 결과 (C1-C4)
+│   └── EVALUATION_REPORT.md      # 최종 요약 보고서
+├── incomplete_patches/           # RQ2 불완전 패치
+├── verification_ablation/        # RQ2 V1-V4 비교
+└── rq_analysis/                  # 모든 RQ 분석
+```
+
+---
+
+## 🎯 예상 결과 (논문 기준)
+
+### RQ1: Theory-Guided Generation
+| 조건 | 성공률 | 설명 |
+|------|--------|------|
+| C1 (Baseline) | ~30% | Post-hoc, no formal guidance |
+| C2 (Vague Hints) | ~40% | Informal prompts |
+| C3 (Pre-hoc) | ~50% | E_bug without verification |
+| C4 (Full) | ~70% | E_bug + triple verification |
+
+### RQ2: Dual Verification
+| 방법 | Precision | Recall |
+|------|-----------|--------|
+| V1 (Exploit-only) | ~60% | ~50% |
+| V2 (Symbolic-only) | ~75% | ~70% |
+| V3 (Consistency-only) | ~85% | ~75% |
+| V4 (Triple) | ~90% | ~80% |
+
+### RQ3: Performance
+| 복잡도 | 평균 시간 |
+|--------|----------|
+| Simple (<50 LoC) | ~120s |
+| Medium (50-100) | ~160s |
+| Complex (>100) | ~240s |
+
+---
+
+## 🔧 문제 해결
+
+### LLM 연결 오류
+```bash
+# Ollama 상태 확인
+curl http://localhost:11434/api/tags
+
+# 모델이 없으면 다운로드
+ollama pull llama3.2:1b
+```
+
+### 메모리 부족
+```bash
+# 순차 실행으로 변경
+python3 scripts/run_full_evaluation.py zeroday \
+    --conditions c4 \
+    --limit 5 \
+    --max-workers 1
+```
+
+### 데이터셋 없음
+```bash
+# 데이터셋 확인
+ls -la datasets/zeroday_repair/
+
+# 케이스 수 확인
+python3 -c "from patchscribe.dataset import load_cases; print(len(load_cases('zeroday')))"
+```
+
+---
+
+## 📚 더 많은 정보
+
+- **전체 워크플로우**: [EXPERIMENT_WORKFLOW.md](EXPERIMENT_WORKFLOW.md)
+- **RQ2 가이드**: [doc/RQ2_EVALUATION_GUIDE.md](doc/RQ2_EVALUATION_GUIDE.md)
+- **구현 요약**: [doc/IMPLEMENTATION_SUMMARY.md](doc/IMPLEMENTATION_SUMMARY.md)
+
+---
+
+## 💡 핵심 명령어만 보기
+
+### 단일 서버
+```bash
+# 1. 빠른 테스트
+./quick_test.sh
+
+# 2. 전체 실험
+./run_all_experiments.sh
+
+# 3. 개별 실행
+python3 scripts/run_full_evaluation.py zeroday --conditions c1 c2 c3 c4 --limit 10
+python3 scripts/inject_incomplete_patches.py --dataset zeroday --limit 10
+python3 scripts/run_verification_ablation.py --dataset zeroday --limit 10 \
+    --incomplete-patches results/incomplete_patches/incomplete_patches_zeroday.json
+
+# 4. 결과 확인
+cat results/evaluation_full/EVALUATION_REPORT.md
+```
+
+### 여러 서버 (분산 실행) ⚡
+
+```bash
+# 1. 각 서버에서 실행 (모든 조건 C1-C4 자동 실행)
+# Server 0:
+./run_server.sh 0 4 20 zeroday
+
+# Server 1:
+./run_server.sh 1 4 20 zeroday
+
+# Server 2:
+./run_server.sh 2 4 20 zeroday
+
+# Server 3:
+./run_server.sh 3 4 20 zeroday
+
+# 2. 결과 수집 (중앙 서버)
+scp -r user@server0:~/patchscribe/results/server0 results/
+scp -r user@server1:~/patchscribe/results/server1 results/
+scp -r user@server2:~/patchscribe/results/server2 results/
+scp -r user@server3:~/patchscribe/results/server3 results/
+
+# 3. 결과 병합
+python3 scripts/merge_results.py --results-dir results --output results/merged
+
+# 4. RQ 분석
+python3 scripts/run_rq_analysis.py results/merged/c4_merged_results.json
+```
+
+**상세 가이드**: [DISTRIBUTED_GUIDE.md](DISTRIBUTED_GUIDE.md) 참고
+
+---
+
+**완료!** 🎉 질문이 있으시면 이슈를 등록해주세요.

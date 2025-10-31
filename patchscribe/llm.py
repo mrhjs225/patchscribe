@@ -41,15 +41,15 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        provider = os.environ.get("PATCHSCRIBE_LLM_PROVIDER", "ollama").lower()
+        provider = "ollama"
         endpoint = os.environ.get("PATCHSCRIBE_LLM_ENDPOINT")
         model = os.environ.get("PATCHSCRIBE_LLM_MODEL")
         if not model:
-            model = DEFAULT_OLLAMA_MODEL if provider == "ollama" else ""
+            model = DEFAULT_OLLAMA_MODEL
         return cls(
             provider=provider,
             endpoint=endpoint,
-            api_key=os.environ.get("PATCHSCRIBE_LLM_API_KEY"),
+            api_key=os.environ.get("OPENAI_API_KEY"),
             model=model,
             timeout=int(os.environ.get("PATCHSCRIBE_LLM_TIMEOUT", "60")),
         )
@@ -57,6 +57,8 @@ class LLMConfig:
 
 class LLMClient:
     """Thin HTTP client for chat-style completion APIs used in the PoC."""
+
+    _OLLAMA_MODEL_CACHE: Dict[tuple[str | None, str], str] = {}
 
     def __init__(self, config: LLMConfig | None = None) -> None:
         self.config = config or LLMConfig.from_env()
@@ -166,6 +168,18 @@ class LLMClient:
         )
         return content.strip()
 
+    def score_patch(self, prompt: str) -> Optional[str]:
+        if not self.available():
+            return None
+        content = self._post_chat(
+            [
+                {"role": "system", "content": self._patch_judge_system_prompt()},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.0,
+        )
+        return content.strip()
+
     def _post_chat(self, messages: List[Dict[str, str]], *, temperature: float) -> str:
         payload = self._build_payload(messages, temperature=temperature)
 
@@ -194,26 +208,38 @@ class LLMClient:
         tags_url = self._ollama_tags_url()
         if not tags_url:
             return model
+        target = model.lower()
+        cache_key = (tags_url, target)
+        cached = self._OLLAMA_MODEL_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
 
         # Use session if available, otherwise fall back to requests module
         http_client = self._session if hasattr(self, '_session') and self._session is not None else requests
 
+        normalized = model
         try:
             response = http_client.get(tags_url, timeout=min(self.config.timeout, 10))
             response.raise_for_status()
             data = response.json()
         except Exception:
-            return model
+            self._OLLAMA_MODEL_CACHE[cache_key] = normalized
+            return normalized
         models = data.get("models") or []
-        target = model.lower()
+        found = False
         for item in models:
             if not isinstance(item, dict):
                 continue
             for key in ("name", "model"):
                 candidate = item.get(key)
                 if isinstance(candidate, str) and candidate.lower() == target:
-                    return candidate
-        return model
+                    normalized = candidate
+                    found = True
+                    break
+            if found:
+                break
+        self._OLLAMA_MODEL_CACHE[cache_key] = normalized
+        return normalized
 
     def _ollama_tags_url(self) -> Optional[str]:
         if not self.config.endpoint:
@@ -272,6 +298,14 @@ class LLMClient:
     def _judge_system_prompt() -> str:
         return (
             "You are a strict security reviewer who only outputs valid JSON objects with scoring metrics."
+        )
+
+    @staticmethod
+    def _patch_judge_system_prompt() -> str:
+        return (
+            "You are a senior application security reviewer. Respond ONLY with JSON including "
+            '"safety", "completeness", "regression_risk", "explanation_alignment" (floats 0-5), '
+            'a short "verdict", and optional "reason".'
         )
 
     @staticmethod

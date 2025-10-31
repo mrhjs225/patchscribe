@@ -32,6 +32,8 @@ class CaseEvaluation:
     consistency: Dict[str, object] | None = None
     first_attempt_success: bool | None = None
     performance: Dict[str, object] | None = None
+    patch_quality: Dict[str, object] | None = None
+    ast_similarity: Dict[str, object] | None = None  # AST-based ground truth similarity
 
     def as_dict(self) -> Dict[str, object]:
         result = {
@@ -51,6 +53,10 @@ class CaseEvaluation:
             result["first_attempt_success"] = self.first_attempt_success
         if self.performance is not None:
             result["performance"] = self.performance
+        if self.patch_quality is not None:
+            result["patch_quality"] = self.patch_quality
+        if self.ast_similarity is not None:
+            result["ast_similarity"] = self.ast_similarity
         return result
 
 
@@ -113,6 +119,8 @@ class Evaluator:
         checklist_count = 0
         llm_totals: Dict[str, float] = {"accuracy": 0.0, "clarity": 0.0, "causality": 0.0}
         llm_counts = 0
+        patch_quality_totals: Dict[str, float] = {"safety": 0.0, "completeness": 0.0, "regression_risk": 0.0, "explanation_alignment": 0.0}
+        patch_quality_counts = 0
         first_attempt_successes = 0
         first_attempt_count = 0
         consistency_passes = 0
@@ -168,6 +176,31 @@ class Evaluator:
                 if have_score:
                     llm_counts += 1
 
+            patch_quality = evaluation.patch_quality or {}
+            scores = patch_quality.get("scores") if isinstance(patch_quality, dict) else None
+            if isinstance(scores, dict) and scores:
+                have_patch_score = False
+                for key in ("safety", "completeness", "regression_risk", "explanation_alignment"):
+                    value = scores.get(key)
+                    if isinstance(value, (int, float)):
+                        patch_quality_totals[key] += float(value)
+                        have_patch_score = True
+                if have_patch_score:
+                    patch_quality_counts += 1
+
+        # Calculate AST similarity averages
+        ast_similarity_count = 0
+        ast_overall_total = 0.0
+        ast_structural_total = 0.0
+        ast_token_total = 0.0
+
+        for evaluation in evaluations:
+            if evaluation.ast_similarity:
+                ast_similarity_count += 1
+                ast_overall_total += evaluation.ast_similarity.get("overall_similarity", 0.0)
+                ast_structural_total += evaluation.ast_similarity.get("structural_similarity", 0.0)
+                ast_token_total += evaluation.ast_similarity.get("token_similarity", 0.0)
+
         metrics = {
             "total_cases": float(total),
             "success_rate": successes / total if total else 0.0,
@@ -181,11 +214,26 @@ class Evaluator:
             "consistency_pass_rate": consistency_passes / consistency_count if consistency_count else 0.0,
             "triple_verification_pass_rate": triple_verification_passes / total if total else 0.0,
         }
+
+        # Add AST similarity metrics if available
+        if ast_similarity_count > 0:
+            metrics.update({
+                "avg_ast_overall_similarity": ast_overall_total / ast_similarity_count,
+                "avg_ast_structural_similarity": ast_structural_total / ast_similarity_count,
+                "avg_ast_token_similarity": ast_token_total / ast_similarity_count,
+            })
         if llm_counts:
             metrics.update(
                 {
                     f"avg_llm_{key}": llm_totals[key] / llm_counts
                     for key in ("accuracy", "clarity", "causality")
+                }
+            )
+        if patch_quality_counts:
+            metrics.update(
+                {
+                    f"avg_patch_{key}": patch_quality_totals[key] / patch_quality_counts
+                    for key in ("safety", "completeness", "regression_risk", "explanation_alignment")
                 }
             )
         return metrics
@@ -289,9 +337,24 @@ def _effect_rate(evaluations: Iterable[CaseEvaluation]) -> float:
 
 
 def _compare_ground_truth(patched: str, ground_truth: Optional[str]) -> Optional[bool]:
+    """
+    Compare patched code with ground truth using AST-based similarity.
+
+    Returns True if patches are structurally similar (>= 0.7 similarity threshold).
+    Falls back to text comparison if AST analysis fails.
+    """
     if ground_truth is None:
         return None
-    return _normalize_code(patched) == _normalize_code(ground_truth)
+
+    # Try AST-based comparison first
+    try:
+        from .ast_similarity import calculate_ast_similarity
+        result = calculate_ast_similarity(patched, ground_truth)
+        # Use 0.7 threshold for structural similarity
+        return result.overall_similarity >= 0.7
+    except Exception:
+        # Fall back to text-based comparison
+        return _normalize_code(patched) == _normalize_code(ground_truth)
 
 
 def _normalize_code(code: str | None) -> str:
@@ -325,6 +388,25 @@ def _evaluate_case_wrapper(
         case.get("ground_truth"),
     )
 
+    # Calculate AST similarity if ground truth is available
+    ast_similarity_info = None
+    ground_truth = case.get("ground_truth")
+    if ground_truth:
+        try:
+            from .ast_similarity import calculate_ast_similarity
+            result = calculate_ast_similarity(artifacts.patch.patched_code, ground_truth)
+            ast_similarity_info = {
+                "overall_similarity": result.overall_similarity,
+                "structural_similarity": result.structural_similarity,
+                "token_similarity": result.token_similarity,
+                "edit_distance": result.edit_distance,
+                "matched_nodes": result.matched_nodes,
+                "total_nodes": result.total_nodes,
+            }
+        except Exception:
+            # If AST similarity calculation fails, just skip it
+            pass
+
     explanation_metrics = artifacts.explanation_metrics
     first_attempt = explanation_metrics.get("first_attempt_success")
 
@@ -355,4 +437,6 @@ def _evaluate_case_wrapper(
         consistency=artifacts.consistency.as_dict() if artifacts.consistency else None,
         first_attempt_success=first_attempt,
         performance=artifacts.performance.as_dict() if artifacts.performance else None,
+        patch_quality=artifacts.patch_quality,
+        ast_similarity=ast_similarity_info,
     )

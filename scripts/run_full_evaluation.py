@@ -326,7 +326,7 @@ def main():
     # Set LLM environment variables from command line args
     import os
     os.environ['PATCHSCRIBE_LLM_PROVIDER'] = args.llm_provider
-    os.environ['PATCHSCRIBE_LLM_MODEL'] = args.llm_model
+    os.environ['PATCHSCRIBE_LLM_MODEL'] = "gpt-5-mini"
     if args.llm_endpoint:
         os.environ['PATCHSCRIBE_LLM_ENDPOINT'] = args.llm_endpoint
     

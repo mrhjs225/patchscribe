@@ -16,6 +16,7 @@ from .explanation import (
     generate_explanations,
 )
 from .explanation_quality import ExplanationEvaluator
+from .patch_quality import PatchQualityEvaluator
 from .formal_spec import (
     FormalBugExplanation,
     FormalPatchExplanation,
@@ -24,6 +25,7 @@ from .formal_spec import (
 )
 from .intervention import InterventionSpec, InterventionPlanner, refine_intervention
 from .patch import PatchGenerator, PatchResult
+from .llm import LLMClient
 from .pcg_builder import PCGBuilder, PCGBuilderConfig
 from .performance import (
     PerformanceProfiler,
@@ -52,6 +54,7 @@ class PipelineArtifacts:
     consistency: ConsistencyResult | None = None
     # Performance metrics
     performance: PerformanceProfile | None = None
+    patch_quality: Dict[str, object] | None = None
 
 
 class PatchScribePipeline:
@@ -65,6 +68,7 @@ class PatchScribePipeline:
         explanation_extra_prompt: str | None = None,
         enable_consistency_check: bool = True,
         enable_performance_profiling: bool = False,
+        llm_client: LLMClient | None = None,
     ) -> None:
         self.config = config or PCGBuilderConfig()
         self.effect_analyzer = PatchEffectAnalyzer(self.config)
@@ -78,6 +82,8 @@ class PatchScribePipeline:
         self.enable_consistency_check = enable_consistency_check
         self.consistency_checker = ConsistencyChecker() if enable_consistency_check else None
         self.enable_performance_profiling = enable_performance_profiling
+        self.llm_client = llm_client or LLMClient()
+        self.patch_quality_evaluator = PatchQualityEvaluator(self.llm_client)
 
     def run(self, vuln_case: Dict[str, object]) -> PipelineArtifacts:
         program = vuln_case["source"].strip("\n")
@@ -118,19 +124,31 @@ class PatchScribePipeline:
             natural_context = build_prompt_context(pcg, scm, intervention)
         elif self.strategy in {"natural", "only_natural"}:
             natural_context = build_natural_context(pcg, scm, intervention)
+
+        patch_generator = PatchGenerator(
+            pcg,
+            program,
+            vuln_case["vuln_line"],
+            vuln_case.get("signature", ""),
+            llm_client=self.llm_client,
+            strategy=self.strategy,
+            natural_context=natural_context if self.strategy != "minimal" else None,
+        )
+        verifier = Verifier(
+            vuln_case.get("signature", ""),
+            original_code=program,
+            vuln_line=vuln_case.get("vuln_line"),
+        )
         
         # Phase 2 & 3: Iterative generation and verification
         for iteration_idx in range(max_iterations):
             generation_ctx = profiler.profile_phase("phase2_generation") if profiler else nullcontext()
             with generation_ctx:
-                patch = PatchGenerator(
-                    pcg,
-                    program,
-                    vuln_case["vuln_line"],
-                    vuln_case.get("signature", ""),
-                    strategy=self.strategy,
-                    natural_context=natural_context if self.strategy != "minimal" else None,
-                ).generate(spec)
+                if self.strategy != "minimal":
+                    patch_generator.natural_context = natural_context
+                else:
+                    patch_generator.natural_context = None
+                patch = patch_generator.generate(spec)
                 
                 effect = self.effect_analyzer.analyze(
                     original_condition=scm.vulnerable_condition,
@@ -151,11 +169,6 @@ class PatchScribePipeline:
             
             verification_ctx = profiler.profile_phase("phase3_verification") if profiler else nullcontext()
             with verification_ctx:
-                verifier = Verifier(
-                    vuln_case.get("signature", ""),
-                    original_code=program,
-                    vuln_line=vuln_case.get("vuln_line"),
-                )
                 verification = verifier.verify(patch, expected_condition=scm.vulnerable_condition)
                 
                 # Consistency checking
@@ -270,6 +283,12 @@ class PatchScribePipeline:
             case=vuln_case,
             use_llm=self.explain_mode in {"llm", "both"},
         )
+        patch_quality = self.patch_quality_evaluator.evaluate(
+            patch_for_explanations,
+            E_bug,
+            E_patch_for_output,
+            verification_for_output,
+        )
         final_spec = spec
         
         # End performance profiling
@@ -312,6 +331,7 @@ class PatchScribePipeline:
             E_patch=E_patch_for_output,
             consistency=consistency,
             performance=performance_profile,
+            patch_quality=patch_quality.as_dict(),
         )
 
     @staticmethod
