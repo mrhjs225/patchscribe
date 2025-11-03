@@ -224,9 +224,17 @@ def main():
     )
 
     args = parser.parse_args()
-    if args.provider.lower() == 'ollama' and args.parallel:
-        print("Warning: Ollama provider detected; disabling parallel model execution to avoid concurrent Ollama requests.")
+
+    # Ollama는 병렬 실행을 제대로 처리하지 못하므로 항상 순차 실행
+    is_local_ollama = (
+        args.provider.lower() == 'ollama' and
+        (not args.endpoint or 'localhost' in args.endpoint or '127.0.0.1' in args.endpoint)
+    )
+
+    if is_local_ollama and args.parallel:
+        print("Warning: Local Ollama detected; disabling parallel model execution to avoid concurrent requests and timeouts.")
         args.parallel = False
+        args.max_parallel_models = 1
     
     print("=" * 80)
     print("PATCHSCRIBE MULTI-MODEL EVALUATION")

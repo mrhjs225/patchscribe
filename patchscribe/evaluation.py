@@ -79,13 +79,21 @@ class Evaluator:
         max_workers: int | None = None,
     ) -> None:
         self.pipeline = pipeline or PatchScribePipeline()
-        provider = LLMConfig.from_env().provider
-        self._force_sequential = provider == "ollama"
-        if self._force_sequential:
+        config = LLMConfig.from_env()
+
+        # Ollama는 병렬 요청을 제대로 처리하지 못하므로 항상 순차 실행
+        # endpoint에 localhost나 127.0.0.1이 포함되어 있으면 로컬 Ollama로 간주
+        is_local_ollama = (
+            config.provider == "ollama" and
+            config.endpoint and
+            ("localhost" in config.endpoint or "127.0.0.1" in config.endpoint)
+        )
+
+        if is_local_ollama:
             if max_workers and max_workers != 1:
                 print(
-                    "Warning: PATCHSCRIBE_LLM_PROVIDER=ollama detected; forcing sequential "
-                    "evaluation to avoid parallel requests to the Ollama daemon."
+                    "Warning: Local Ollama detected; forcing sequential evaluation "
+                    "to avoid parallel requests that cause timeouts."
                 )
             self.max_workers = 1
         else:

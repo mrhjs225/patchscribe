@@ -33,7 +33,7 @@ class LLMConfig:
     endpoint: str | None = None
     api_key: str | None = None
     model: str = DEFAULT_OLLAMA_MODEL
-    timeout: int = 180
+    timeout: int = 300
 
     def __post_init__(self) -> None:
         if not self.endpoint and self.provider == "ollama":
@@ -51,7 +51,7 @@ class LLMConfig:
             endpoint=endpoint,
             api_key=os.environ.get("OPENAI_API_KEY"),
             model=model,
-            timeout=int(os.environ.get("PATCHSCRIBE_LLM_TIMEOUT", "180")),
+            timeout=int(os.environ.get("PATCHSCRIBE_LLM_TIMEOUT", "300")),
         )
 
 
