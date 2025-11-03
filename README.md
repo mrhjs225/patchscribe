@@ -14,14 +14,21 @@ PatchScribe는 형식적 인과 이론(formal causality theory)을 활용하여 
 # Python 3.8 이상 필요
 python3 --version
 
-# LLM 설정 (로컬 모델 사용 시)
-export PATCHSCRIBE_LLM_PROVIDER=ollama
-export PATCHSCRIBE_LLM_MODEL=llama3.2:1b
-
-# Ollama 시작 및 모델 다운로드
+# Ollama 시작 (로컬 LLM 서버)
 ollama serve  # 별도 터미널에서
-ollama pull llama3.2:1b
+
+# 실험 대상 모델 다운로드 (16개 중 필요한 것만)
+ollama pull qwen3:14b
+ollama pull gemma3:12b
+ollama pull deepseek-r1:7b
+# ... 필요한 모델 추가
+
+# OpenAI API 키 설정 (GPT Judge 평가용)
+export OPENAI_API_KEY=sk-...
 ```
+
+**주의**: 환경 변수 `PATCHSCRIBE_LLM_*` 설정은 **불필요**합니다.
+모델은 `--models` 옵션으로 지정하며, 실험 스크립트가 자동으로 설정합니다.
 
 ### 2️⃣ 실험 실행
 
@@ -187,20 +194,27 @@ patchscribe/
 
 ### 실험
 ```bash
-# 빠른 테스트
+# 빠른 테스트 (3개 케이스)
 python3 scripts/run_experiment.py --quick
 
-# 전체 실험
+# 전체 모델 실험 (16개 모델)
 python3 scripts/run_experiment.py --dataset zeroday --limit 10
 
-# 특정 모델만 (짧은 이름 - 간편!)
+# 특정 모델만
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
-    --models gpt-oss-20b qwen3-4b
+    --models qwen3:14b gemma3:12b
 
 # 특정 모델 + 조건
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
     --models llama3.2:1b --conditions c4
 ```
+
+**전체 실험 대상 모델 (16개)**:
+- `qwen3:14b`, `qwen3:8b`, `qwen3:4b`, `qwen3:1.7b`, `qwen3:0.6b`
+- `gemma3:12b`, `gemma3:4b`, `gemma3:1b`, `gemma3:270m`
+- `deepseek-r1:14b`, `deepseek-r1:8b`, `deepseek-r1:7b`, `deepseek-r1:1.5b`
+- `llama3.2:3b`, `llama3.2:1b`
+- `gpt-oss:20b`
 
 ### 분석
 ```bash
@@ -336,15 +350,22 @@ python3 scripts/run_experiment.py --dataset zeroday --offset 10 --limit 20
 ```bash
 # 모델 선택
 --models MODEL [MODEL ...]
-  실험할 모델 리스트 (기본값: 모든 기본 모델)
+  실험할 모델 리스트 (기본값: 16개 모델 전체)
 
-  모델 이름 형식 (둘 다 가능):
-  - 짧은 이름: gemma3-4b, qwen3-4b, llama3.2:3b
-  - 전체 이름: ollama:gemma3:4b, ollama:qwen3:4b
+  전체 실험 대상 모델 (16개):
+  - qwen3:14b, qwen3:8b, qwen3:4b, qwen3:1.7b, qwen3:0.6b
+  - gemma3:12b, gemma3:4b, gemma3:1b, gemma3:270m
+  - deepseek-r1:14b, deepseek-r1:8b, deepseek-r1:7b, deepseek-r1:1.5b
+  - llama3.2:3b, llama3.2:1b
+  - gpt-oss:20b
+
+  모델 이름 형식:
+  - 기본: qwen3:14b, gemma3:12b, deepseek-r1:7b
+  - provider(ollama)는 자동 설정됨
 
   예시:
-  --models llama3.2:3b qwen3:4b
-  --models ollama:gemma3:4b ollama:deepseek-r1:7b
+  --models qwen3:14b gemma3:12b
+  --models llama3.2:3b deepseek-r1:7b
 
 # 조건 선택
 --conditions {c1,c2,c3,c4} [...]
@@ -370,12 +391,17 @@ python3 scripts/run_experiment.py --dataset zeroday --offset 10 --limit 20
 ```bash
 # C4만, 특정 모델 2개
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
-    --models llama3.2:3b qwen3:4b \
+    --models qwen3:14b gemma3:12b \
     --conditions c4
 
-# Ablation study: C1-C4 전체, 모든 모델
+# Ablation study: C1-C4 전체, 16개 모델 전체
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
     --conditions c1 c2 c3 c4
+
+# 소형 모델만 테스트
+python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
+    --models qwen3:1.7b gemma3:1b llama3.2:1b \
+    --conditions c4
 
 # RQ2 제외, C4만
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \

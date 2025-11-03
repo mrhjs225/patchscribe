@@ -33,12 +33,24 @@ from dataclasses import dataclass
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-# 기본 모델 리스트
+# 전체 실험 대상 모델 리스트 (16개)
 DEFAULT_MODELS = [
-    "ollama:gemma3:4b",
-    "ollama:qwen3:4b",
-    "ollama:deepseek-r1:7b",
-    "ollama:llama3.2:3b",
+    "qwen3:14b",
+    "qwen3:8b",
+    "qwen3:4b",
+    "qwen3:1.7b",
+    "gemma3:12b",
+    "gemma3:4b",
+    "gemma3:270m",
+    "deepseek-r1:14b",
+    "deepseek-r1:8b",
+    "deepseek-r1:7b",
+    "llama3.2:3b",
+    "llama3.2:1b",
+    "gpt-oss:20b",
+    "gemma3:1b",
+    "deepseek-r1:1.5b",
+    "qwen3:0.6b",
 ]
 
 
@@ -312,17 +324,20 @@ def run_single_evaluation(
     from patchscribe.pipeline import PatchScribePipeline
     from patchscribe.evaluation import Evaluator
 
-    # 모델 스펙 파싱 (짧은 이름도 지원)
-    if ':' in model_spec:
-        provider, model_name = model_spec.split(':', 1)
+    # 모델 스펙 파싱
+    # 형식: "qwen3:14b" 또는 "ollama:qwen3:14b"
+    # 기본 provider는 항상 ollama
+    if model_spec.startswith('ollama:'):
+        # "ollama:qwen3:14b" -> "qwen3:14b"
+        model_name = model_spec[7:]  # "ollama:" 제거
     else:
-        # 짧은 이름인 경우 기본 provider는 ollama
-        provider = 'ollama'
+        # "qwen3:14b" -> "qwen3:14b"
         model_name = model_spec
 
-    # 환경 변수 설정
-    os.environ['PATCHSCRIBE_LLM_PROVIDER'] = provider
+    # 환경 변수 설정 (모든 모델은 ollama 사용)
+    os.environ['PATCHSCRIBE_LLM_PROVIDER'] = 'ollama'
     os.environ['PATCHSCRIBE_LLM_MODEL'] = model_name
+    os.environ['PATCHSCRIBE_LLM_ENDPOINT'] = 'http://localhost:11434/api/chat'
 
     # 조건별 설정
     strategy, enable_consistency = get_condition_settings(condition)
@@ -577,26 +592,27 @@ def main():
    # Server 1:
    python3 scripts/run_experiment.py --distributed 1 4 20 --dataset zeroday
 
-4. 특정 모델만 (짧은 이름):
+4. 특정 모델만:
    python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
-       --models gpt-oss-20b qwen3-4b
+       --models qwen3:14b gemma3:12b
 
-5. 특정 모델만 (전체 이름):
-   python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
-       --models ollama:gpt-oss-20b ollama:qwen3-4b
-
-6. 특정 모델과 조건만:
+5. 특정 모델과 조건만:
    python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
        --models llama3.2:1b \
        --conditions c4
 
 모델 이름 형식:
-  - 짧은 이름: gemma3-4b, qwen3-4b, gpt-oss-20b (provider는 ollama로 자동 설정)
-  - 전체 이름: ollama:gemma3:4b, ollama:qwen3-4b
-  - 콜론(:)과 하이픈(-) 모두 사용 가능
+  - 기본 형식: qwen3:14b, gemma3:12b, deepseek-r1:7b
+  - provider(ollama)는 자동 설정됨
+
+전체 실험 대상 모델 (16개):
+  qwen3:14b, qwen3:8b, qwen3:4b, qwen3:1.7b,
+  gemma3:12b, gemma3:4b, gemma3:270m, gemma3:1b,
+  deepseek-r1:14b, deepseek-r1:8b, deepseek-r1:7b, deepseek-r1:1.5b,
+  llama3.2:3b, llama3.2:1b, gpt-oss:20b, qwen3:0.6b
 
 기본값:
-  - Models: gemma3:4b, qwen3:4b, deepseek-r1:7b, llama3.2:3b
+  - Models: 위 16개 모델 전체
   - Conditions: c1, c2, c3, c4
   - Dataset: zeroday
         """
