@@ -41,16 +41,19 @@ print(f'Total cases: {len(cases)}')
 
 ### 2단계: 모델 설정 (선택 사항)
 
-`run_server.sh` 스크립트 상단에서 테스트할 모델 리스트를 수정할 수 있습니다:
+테스트할 모델 리스트를 `--models` 옵션으로 지정할 수 있습니다:
 
 ```bash
-# run_server.sh 파일 내용
-MODELS=(
-    "ollama:llama3.2:1b"
-    "ollama:llama3.2:3b"
-    "ollama:qwen2.5-coder:7b"
-)
+# 예시: 특정 모델만 테스트
+python3 scripts/run_distributed.py 0 4 20 zeroday \
+    --models ollama:llama3.2:1b ollama:llama3.2:3b ollama:qwen2.5-coder:7b
 ```
+
+기본 모델 (--models 미지정 시):
+- ollama:gemma3:4b
+- ollama:qwen3:4b
+- ollama:deepseek-r1:7b
+- ollama:llama3.2:3b
 
 각 모델은 자동으로 Ollama에서 다운로드됩니다.
 
@@ -60,29 +63,29 @@ MODELS=(
 
 ```bash
 # 문법
-./run_server.sh <SERVER_ID> <NUM_SERVERS> <TOTAL_CASES> [DATASET]
+python3 scripts/run_distributed.py <SERVER_ID> <NUM_SERVERS> <TOTAL_CASES> [DATASET]
 ```
 
 #### 예시: 4대 서버, 20개 케이스
 
 **Server 0 (148):**
 ```bash
-./run_server.sh 0 4 20 zeroday
+python3 scripts/run_distributed.py 0 4 20 zeroday
 ```
 
 **Server 1 (selab2):**
 ```bash
-./run_server.sh 1 4 20 zeroday
+python3 scripts/run_distributed.py 1 4 20 zeroday
 ```
 
 **Server 2 (soty):**
 ```bash
-./run_server.sh 2 4 20 zeroday
+python3 scripts/run_distributed.py 2 4 20 zeroday
 ```
 
 **Server 3 (central):**
 ```bash
-./run_server.sh 3 4 20 zeroday
+python3 scripts/run_distributed.py 3 4 20 zeroday
 ```
 
 각 서버는 할당된 데이터에 대해 **모든 모델 × 모든 조건(C1-C4)**을 자동으로 실험합니다.
@@ -112,7 +115,7 @@ scp -r user@central:~/patchscribe/results/server3 results/
 
 ```bash
 # 중앙 서버에서 실행
-python3 scripts/merge_results.py --results-dir results --output results/merged
+python3 scripts/aggregate_results.py --mode merge --results-dir results --output results/merged
 ```
 
 **출력 예시:**
@@ -220,7 +223,7 @@ for i in "${!SERVERS[@]}"; do
     echo "Starting Server $i on $SERVER..."
 
     ssh user@$SERVER "cd ~/patchscribe && \
-        nohup ./run_server.sh $i ${#SERVERS[@]} $TOTAL_CASES zeroday \
+        nohup python3 scripts/run_distributed.py $i ${#SERVERS[@]} $TOTAL_CASES zeroday \
         > server${i}.log 2>&1 &"
 done
 
@@ -241,7 +244,7 @@ ssh user@148 "cd ~/patchscribe && ls -lh results/server0/*.json | wc -l"
 
 ```bash
 # 일부 서버만 완료된 경우에도 병합 가능
-python3 scripts/merge_results.py --results-dir results --output results/partial
+python3 scripts/aggregate_results.py --mode merge --results-dir results --output results/partial
 
 # 나중에 나머지 서버 결과를 추가하여 재병합
 ```
@@ -267,11 +270,11 @@ git rev-parse HEAD  # 동일한 commit 확인
 `TOTAL_CASES`는 **실제 데이터셋 크기**와 일치해야 함:
 ```bash
 # 잘못된 예
-./run_server.sh 0 4 30 zeroday  # 실제로는 20개인데 30 입력
+python3 scripts/run_distributed.py 0 4 30 zeroday  # 실제로는 20개인데 30 입력
 
 # 올바른 예
 TOTAL=$(python3 -c "from patchscribe.dataset import load_cases; print(len(load_cases('zeroday')))")
-./run_server.sh 0 4 $TOTAL zeroday
+python3 scripts/run_distributed.py 0 4 $TOTAL zeroday
 ```
 
 ### 3. 중복 실행 방지
@@ -286,10 +289,10 @@ TOTAL=$(python3 -c "from patchscribe.dataset import load_cases; print(len(load_c
 ```bash
 # 실패한 서버만 재실행
 # Server 1이 실패했다면:
-ssh user@selab2 "cd ~/patchscribe && ./run_server.sh 1 4 20 zeroday"
+ssh user@selab2 "cd ~/patchscribe && python3 scripts/run_distributed.py 1 4 20 zeroday"
 
 # 완료 후 전체 재병합
-python3 scripts/merge_results.py
+python3 scripts/aggregate_results.py --mode merge
 ```
 
 ### 결과 검증
@@ -325,16 +328,16 @@ EOF
 
 ```bash
 # 1. 각 서버 실행 (SERVER_ID만 변경)
-./run_server.sh 0 4 20 zeroday  # Server 0
-./run_server.sh 1 4 20 zeroday  # Server 1
-./run_server.sh 2 4 20 zeroday  # Server 2
-./run_server.sh 3 4 20 zeroday  # Server 3
+python3 scripts/run_distributed.py 0 4 20 zeroday  # Server 0
+python3 scripts/run_distributed.py 1 4 20 zeroday  # Server 1
+python3 scripts/run_distributed.py 2 4 20 zeroday  # Server 2
+python3 scripts/run_distributed.py 3 4 20 zeroday  # Server 3
 
 # 2. 결과 수집 (중앙 서버)
 scp -r user@server*:~/patchscribe/results/server* results/
 
 # 3. 병합
-python3 scripts/merge_results.py
+python3 scripts/aggregate_results.py --mode merge
 
 # 4. 분석
 python3 scripts/run_rq_analysis.py results/merged/c4_merged_results.json

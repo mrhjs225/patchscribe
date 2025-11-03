@@ -169,11 +169,58 @@ python3 -c "from patchscribe.dataset import load_cases; print(len(load_cases('ze
 
 ---
 
+## 📋 Quick Reference - Research Questions
+
+### RQ1: Theory-Guided Generation Effectiveness
+**질문**: 사전 형식 명세(E_bug)가 더 정확한 패치를 생성하는가?
+
+**실행**:
+```bash
+python3 scripts/run_full_evaluation.py zeroday --conditions c1 c2 c3 c4 --limit 10
+```
+
+**측정 지표**:
+- Triple verification rate (삼중 검증 통과율)
+- Ground truth similarity (실제 패치 유사도)
+- First attempt success rate (첫 시도 성공률)
+
+### RQ2: Dual Verification Effectiveness
+**질문**: 이중 설명(E_bug ↔ E_patch) + 일관성 검증이 불완전 패치를 탐지하는가?
+
+**실행**:
+```bash
+python3 scripts/run_full_evaluation.py zeroday --conditions c4 --limit 10
+```
+
+**측정 지표**:
+- Incomplete patches caught (불완전 패치 탐지 수)
+- Consistency violation breakdown (일관성 위반 유형)
+
+### RQ3: Scalability and Performance
+**질문**: 3단계 워크플로우의 시간 오버헤드는?
+
+**측정 지표**:
+- Phase 1/2/3 time (단계별 시간)
+- Total time (목표: <3분)
+- Peak memory usage
+
+### RQ4: Explanation Quality
+**질문**: 이중 설명이 개발자에게 유용한 인사이트를 제공하는가?
+
+**측정 지표**:
+- Checklist coverage (자동)
+- Expert quality scores (GPT 기반)
+
+---
+
 ## 📚 더 많은 정보
 
 - **전체 워크플로우**: [EXPERIMENT_WORKFLOW.md](EXPERIMENT_WORKFLOW.md)
-- **RQ2 가이드**: [doc/RQ2_EVALUATION_GUIDE.md](doc/RQ2_EVALUATION_GUIDE.md)
-- **구현 요약**: [doc/IMPLEMENTATION_SUMMARY.md](doc/IMPLEMENTATION_SUMMARY.md)
+- **데이터셋 가이드**: [DATASET_GUIDE.md](DATASET_GUIDE.md)
+- **RQ 평가 가이드**: [RQ_EVALUATION_GUIDE.md](RQ_EVALUATION_GUIDE.md)
+- **RQ2 전문 가이드**: [RQ2_EVALUATION_GUIDE.md](RQ2_EVALUATION_GUIDE.md)
+- **분산 실행**: [DISTRIBUTED_GUIDE.md](DISTRIBUTED_GUIDE.md)
+- **성능 튜닝**: [PERFORMANCE_TUNING.md](PERFORMANCE_TUNING.md)
 
 ---
 
@@ -202,16 +249,16 @@ cat results/evaluation_full/EVALUATION_REPORT.md
 ```bash
 # 1. 각 서버에서 실행 (모든 모델 × 모든 조건 C1-C4 자동 실행)
 # Server 0:
-./run_server.sh 0 4 20 zeroday
+python3 scripts/run_distributed.py 0 4 20 zeroday
 
 # Server 1:
-./run_server.sh 1 4 20 zeroday
+python3 scripts/run_distributed.py 1 4 20 zeroday
 
 # Server 2:
-./run_server.sh 2 4 20 zeroday
+python3 scripts/run_distributed.py 2 4 20 zeroday
 
 # Server 3:
-./run_server.sh 3 4 20 zeroday
+python3 scripts/run_distributed.py 3 4 20 zeroday
 
 # 2. 결과 수집 (중앙 서버)
 scp -r user@server0:~/patchscribe/results/server0 results/
@@ -220,7 +267,7 @@ scp -r user@server2:~/patchscribe/results/server2 results/
 scp -r user@server3:~/patchscribe/results/server3 results/
 
 # 3. 결과 병합
-python3 scripts/merge_results.py --results-dir results --output results/merged
+python3 scripts/aggregate_results.py --mode merge --results-dir results --output results/merged
 
 # 4. RQ 분석 (모델별로)
 python3 scripts/run_rq_analysis.py results/merged/llama3.2:1b/c4_merged_results.json
@@ -229,7 +276,7 @@ python3 scripts/run_rq_analysis.py results/merged/qwen2.5-coder:7b/c4_merged_res
 ```
 
 **참고**:
-- 테스트할 모델 리스트는 `run_server.sh` 파일 상단에서 수정 가능
+- 테스트할 모델 리스트는 `--models` 옵션으로 지정 가능 (기본값: gemma3:4b, qwen3:4b, deepseek-r1:7b, llama3.2:3b)
 - 각 서버는 할당된 데이터에 대해 모든 모델과 조건을 자동으로 실험
 
 **상세 가이드**: [DISTRIBUTED_GUIDE.md](DISTRIBUTED_GUIDE.md) 참고

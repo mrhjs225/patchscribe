@@ -1,155 +1,262 @@
-# PatchScribe PoC
+# PatchScribe
 
-PatchScribe는 취약점에 대한 인과적 설명을 구축하고, LLM 기반 패치 생성을 안내하며, 
-형식적 설명과 자연어 설명을 모두 생성하는 개념 증명(Proof-of-Concept) 파이프라인입니다. 
-현재 저장소는 APPATCH 데이터셋(`zeroday_repair` 하위 집합에 중점)에 대해 파이프라인을 
-실행하고 수동 검사를 위한 결과를 수집하는 데 중점을 두고 있습니다.
+**Theory-Guided Vulnerability Repair Framework with Dual Causal Explanations**
 
-## 프로젝트 구조
+PatchScribe는 형식적 인과 이론(formal causality theory)을 활용하여 취약점을 자동으로 수정하고, 이중 인과 설명(E_bug ↔ E_patch)을 통해 검증하는 프레임워크입니다.
 
-```
-.
-├── patchscribe/
-│   ├── analysis/              # 휴리스틱 정적/동적/기호 분석기
-│   ├── tools/                 # 선택적 래퍼 (clang, angr)
-│   ├── dataset.py             # poc/zeroday 데이터셋 로더
-│   ├── pipeline.py            # 엔드투엔드 오케스트레이션
-│   ├── patch.py               # LLM 가이드 패치 합성 (formal/natural/minimal)
-│   ├── verification.py        # 기호/모델/퍼징 검증 (KLEE/CBMC/LibFuzzer + 휴리스틱 폴백)
-│   ├── explanation.py         # 형식적 + 자연어 설명 생성기
-│   ├── cli.py                 # 커맨드라인 진입점
-│   └── evaluation.py          # 집계 메트릭 및 보고서
-├── datasets/                  # APPATCH 데이터셋 (zeroday, extractfix, patchdb)
-├── README.md                  # 이 파일
-└── poc_plan_clean.md          # 통합 PoC 계획
-```
+---
 
-## PoC 실행하기
+## 🚀 빠른 시작
 
-아래의 모든 명령어는 저장소 루트에서 실행되며, Python 3.11+ 버전과 
-필요한 의존성이 설치되어 있다고 가정합니다.
+### 1️⃣ 환경 설정
 
-### 기본 실행
+```bash
+# Python 3.8 이상 필요
+python3 --version
 
-```
-# 기본 PoC 데이터셋 실행 (휴리스틱 toy 예제)
-python -m patchscribe.cli
-
-# ID로 특정 케이스 실행
-python -m patchscribe.cli buffer_overflow_simple
-```
-
-### 전략 (C1–C3)
-
-| 플래그 | 설명 |
-|------|-------------|
-| `--strategy minimal` | C1: 서명만으로 패치 (PCG/SCM 컨텍스트 없음) |
-| `--strategy formal`  | C2: PCG/SCM 유도 개입 사용 (기본값) |
-| `--strategy natural` | C3: 형식적 컨텍스트 + 인과적 자연어 요약(개입·패치·효과를 모두 제공) |
-| `--strategy only_natural` | 형식식 대신 자연어 설명(인과 경로·개입 계획·패치 영향)을 사용 |
-
-자연어 설명은 두 가지 방식으로 생성할 수 있습니다:
-
-| 플래그 | 설명 |
-|------|-------------|
-| `--explain-mode template` | PCG/SCM에서 구축된 결정적 템플릿 (기본값) |
-| `--explain-mode llm`      | 인과적 컨텍스트를 사용하여 LLM에게 설명 작성 요청 (참조용 템플릿 표시) |
-| `--explain-mode both`     | 템플릿 및 LLM 작성 설명 모두 생성 |
-
-`natural`/`only_natural` 전략을 선택하면 LLM 프롬프트에 다음과 같은 자연어 서술이 자동으로
-추가됩니다:
-- 취약점 개요, 논리식(PCG/SCM)의 자연어 해석
-- 인과 경로 및 개입 계획(원인·조치·기대효과)
-- 적용된 패치 diff 요약과 패치 효과 분석
-- (필요 시) ground truth 패치로부터 도출한 전/후 비교
-
-zeroday 데이터셋에서 (C3) 예제 실행 (처음 5개 샘플):
-```
-python -m patchscribe.cli --dataset zeroday --limit 5 --strategy natural
-```
-
-### 결과 저장
-
-결과를 디스크에 저장하려면 `--output`을 사용하세요. 기본값인 `--format json` 또는
-패치 차이, 설명, 프롬프트 컨텍스트를 포함하는 검토자 친화적인 보고서를 위한
-`--format markdown`을 선택할 수 있습니다.
-
-```
-python -m patchscribe.cli \
-    --dataset zeroday --limit 20 --strategy formal \
-    --explain-mode both \
-    --output results/zeroday_formal.md --format markdown
-```
-
-### 자동 메트릭 및 GPT 평가
-
-집계 메트릭(성공률, 정답 일치 등)을 평가합니다. GPT API를 구성하면 패치 안정성(GPT 점수)과
-설명 품질(정확성/명확성/인과성)을 자동으로 수집합니다:
-```
-python -m patchscribe.cli \
-    --dataset zeroday --limit 20 --strategy formal \
-    --evaluate --output results/zeroday_metrics.json
-```
-
-### Ollama를 사용한 로컬 LLM 실험
-
-[Ollama](https://ollama.com/)를 통해 대체 경량 모델(예: Qwen, LLaMA, DeepSeek, Gemma)을 
-시도할 수 있습니다. Ollama 데몬이 로컬에서 실행 중인지 확인하고(`ollama serve`), 
-다음과 같이 몇 가지 모델을 가져옵니다(24GB GPU 환경 기준):
-
-```
-./scripts/setup_ollama_models.sh
-```
-
-`patchscribe.cli`를 호출하기 전에 다음 변수를 내보내 파이프라인이 Ollama를 
-대상으로 하도록 구성합니다:
-
-```
+# LLM 설정 (로컬 모델 사용 시)
 export PATCHSCRIBE_LLM_PROVIDER=ollama
-# 예제 모델: qwen3:0.6b, DeepSeek-R1:1.5b, gemma3:1b, Llama3.2:1b
-export PATCHSCRIBE_LLM_MODEL=Llama3.2:1b
-# Ollama가 기본 포트에서 실행되는 경우 선택 사항:
-export PATCHSCRIBE_LLM_ENDPOINT=http://127.0.0.1:11434/api/chat
-python -m patchscribe.cli --dataset zeroday --limit 1 --strategy formal
+export PATCHSCRIBE_LLM_MODEL=llama3.2:1b
+
+# Ollama 시작 및 모델 다운로드
+ollama serve  # 별도 터미널에서
+ollama pull llama3.2:1b
 ```
 
-동일한 구성을 CLI 옵션으로 직접 전달할 수도 있습니다:
+### 2️⃣ 실험 실행
+
+PatchScribe는 **2개의 핵심 스크립트**로 모든 실험을 수행합니다:
+
+#### 📊 **실험 스크립트** - `run_experiment.py`
+
+모든 실험 워크플로우를 단일 스크립트로 실행합니다.
+
+```bash
+# 빠른 테스트 (3개 케이스)
+python3 scripts/run_experiment.py --quick
+
+# 로컬 실험 (10개 케이스)
+python3 scripts/run_experiment.py --dataset zeroday --limit 10
+
+# 분산 실험 (Server 0, 4대 서버 중)
+python3 scripts/run_experiment.py --distributed 0 4 20 --dataset zeroday
+```
+
+**주요 기능**:
+- ✅ 로컬 및 분산 실험 지원
+- ✅ 모든 모델 × 조건(C1-C4) 자동 실험
+- ✅ RQ2용 불완전 패치 자동 생성
+- ✅ 진행 상황 실시간 표시
+
+#### 📈 **분석 스크립트** - `analyze.py`
+
+실험 결과를 자동으로 분석하여 모든 RQ 분석 결과를 생성합니다.
+
+```bash
+# 로컬 실험 결과 분석
+python3 scripts/analyze.py results/local
+
+# 분산 실험 결과 병합 및 분석
+python3 scripts/analyze.py --merge results/server*
+
+# 다중 모델 비교
+python3 scripts/analyze.py --compare results/model1 results/model2
+```
+
+**주요 기능**:
+- ✅ RQ1-RQ4 자동 분석
+- ✅ 분산 결과 자동 병합
+- ✅ 다중 모델 비교 리포트
+- ✅ Markdown + JSON 리포트 생성
+
+---
+
+## 📖 실험 예시
+
+### 로컬 환경에서 전체 파이프라인
+
+```bash
+# 1. 실험 실행 (10개 케이스)
+python3 scripts/run_experiment.py --dataset zeroday --limit 10
+
+# 2. 결과 분석
+python3 scripts/analyze.py results/local
+```
+
+### 분산 환경에서 대규모 실험
+
+```bash
+# 각 서버에서 실행
+# Server 0:
+python3 scripts/run_experiment.py --distributed 0 4 20 --dataset zeroday
+
+# Server 1:
+python3 scripts/run_experiment.py --distributed 1 4 20 --dataset zeroday
+
+# Server 2:
+python3 scripts/run_experiment.py --distributed 2 4 20 --dataset zeroday
+
+# Server 3:
+python3 scripts/run_experiment.py --distributed 3 4 20 --dataset zeroday
+
+# 중앙 서버에서 결과 수집 및 분석
+python3 scripts/analyze.py --merge results/server*
+```
+
+---
+
+## 📊 Research Questions
+
+### RQ1: Theory-Guided Generation Effectiveness
+**질문**: 사전 형식 명세(E_bug)가 더 정확한 패치를 생성하는가?
+
+**측정 지표**:
+- Triple verification rate (삼중 검증 통과율)
+- Ground truth similarity (실제 패치 유사도)
+- First attempt success rate (첫 시도 성공률)
+
+### RQ2: Dual Verification Effectiveness
+**질문**: 이중 설명(E_bug ↔ E_patch) + 일관성 검증이 불완전 패치를 탐지하는가?
+
+**측정 지표**:
+- Incomplete patches caught (불완전 패치 탐지 수)
+- Consistency violation breakdown (일관성 위반 유형)
+
+### RQ3: Scalability and Performance
+**질문**: 3단계 워크플로우의 시간 오버헤드는?
+
+**측정 지표**:
+- Phase 1/2/3 time (단계별 시간)
+- Total time (목표: <3분)
+- Peak memory usage
+
+### RQ4: Explanation Quality
+**질문**: 이중 설명이 개발자에게 유용한 인사이트를 제공하는가?
+
+**측정 지표**:
+- Checklist coverage (자동)
+- Expert quality scores (GPT 기반)
+
+---
+
+## 🗂️ 프로젝트 구조
 
 ```
-python -m patchscribe.cli \
-    --dataset zeroday --limit 1 --strategy formal \
-    --llm-provider ollama --llm-model Llama3.2:1b
+patchscribe/
+├── scripts/
+│   ├── run_experiment.py    # 통합 실험 스크립트 ⭐
+│   └── analyze.py            # 통합 분석 스크립트 ⭐
+├── patchscribe/
+│   ├── pipeline.py           # PatchScribe 메인 파이프라인
+│   ├── pcg.py                # Program Causal Graph
+│   ├── scm.py                # Structural Causal Model
+│   ├── verification.py       # Triple verification
+│   └── evaluation.py         # 평가 프레임워크
+├── datasets/
+│   └── zeroday_repair/       # Zero-day 취약점 데이터셋
+├── doc/
+│   ├── QUICKSTART.md         # 빠른 시작 가이드
+│   ├── RQ_EVALUATION_GUIDE.md
+│   └── DISTRIBUTED_GUIDE.md
+└── results/                   # 실험 결과 (자동 생성)
 ```
 
-가져온 로컬 모델(예: `qwen3:0.6b`, `DeepSeek-R1:1.5b`, `gemma3:1b`, `Llama3.2:1b`)로 `--llm-model` 값을 
-변경하여 응답을 비교할 수 있습니다. 필요한 경우 `--llm-timeout`으로 초 단위 타임아웃을 조정하세요.
-Ollama의 HTTP API는 모델 이름 대소문자를 구분하므로 `ollama list`에 표시된 표기와 동일하게 지정해야 합니다.
+---
 
-설명용 LLM 프롬프트에 추가 지시를 전달하려면 `--explanation-prompt` 또는
-`--explanation-prompt-file`을 사용할 수 있습니다. 두 옵션을 함께 쓰면 텍스트가 결합되어
-LLM 프롬프트 마지막에 덧붙습니다.
+## 📚 상세 문서
 
-`run.py` 스크립트는 기본 전략(minimal/formal/natural)을 한 번에 실행하는 단순 래퍼입니다.
+- **[QUICKSTART.md](doc/QUICKSTART.md)** - 전체 실험 실행 가이드
+- **[RQ_EVALUATION_GUIDE.md](doc/RQ_EVALUATION_GUIDE.md)** - RQ 평가 상세 가이드
+- **[DISTRIBUTED_GUIDE.md](doc/DISTRIBUTED_GUIDE.md)** - 분산 실행 가이드
+- **[DATASET_GUIDE.md](doc/DATASET_GUIDE.md)** - 데이터셋 가이드
 
-## 수동 평가 워크플로우
+---
 
-1. `--output ... --format markdown`으로 파이프라인을 실행하여 사람이 읽을 수 있는 
-   보고서를 생성합니다. 각 케이스 섹션에는 다음이 포함됩니다:
-   - 패치 차이(diff)
-   - 정답 미리보기 (`nonvul.c` 스니펫)
-   - 템플릿 + (선택적) LLM 생성 자연어 설명
-   - 형식적 SCM 요약
-   - LLM에 사용된 프롬프트 컨텍스트 및 설명 프롬프트
-2. 베이스라인 비교를 위해 다른 `--strategy` 플래그 또는 `--compare`(플레이스홀더)로 
-   재실행하고 출력을 별도의 파일 이름으로 저장합니다.
-3. 검토자는 Markdown 파일에 주석을 달거나 PDF로 변환하고 `poc_plan_clean.md` 
-   (섹션 3.3)의 루브릭을 사용하여 설명에 점수를 매길 수 있습니다.
+## 🎯 실험 조건 (C1-C4)
 
-## 현재 상태
+| 조건 | 설명 | 예상 성공률 |
+|------|------|------------|
+| **C1** (Baseline) | Post-hoc, no formal guidance | ~30% |
+| **C2** (Vague Hints) | Informal prompts | ~40% |
+| **C3** (Pre-hoc) | E_bug without verification | ~50% |
+| **C4** (Full) | E_bug + triple verification | ~70% |
 
-- ✅ APPATCH zeroday 데이터셋에 대한 패치/설명 번들을 생성하는 엔드투엔드 PoC 파이프라인
-- ✅ 프롬프트 컨텍스트가 있는 전환 가능한 LLM 전략 (minimal/formal/natural)
-- ✅ 수동/자동 검토를 위한 메트릭 + Markdown 보고서 (KLEE/CBMC/LibFuzzer 기반 삼중 검증 및 GPT 점수 포함)
-- ⚠️ 베이스라인 전략(`raw_gpt4`, `vrpilot` 등)에는 구체적인 프롬프트 정의가 필요
+---
 
-전체 연구 계획 및 남은 작업에 대해서는 `poc_plan_clean.md`를 참조하세요.
+## 💡 핵심 명령어
+
+### 실험
+```bash
+# 빠른 테스트
+python3 scripts/run_experiment.py --quick
+
+# 전체 실험
+python3 scripts/run_experiment.py --dataset zeroday --limit 10
+
+# 특정 모델만 (짧은 이름 - 간편!)
+python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
+    --models gpt-oss-20b qwen3-4b
+
+# 특정 모델 + 조건
+python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
+    --models llama3.2:1b --conditions c4
+```
+
+### 분석
+```bash
+# 로컬 결과 분석
+python3 scripts/analyze.py results/local
+
+# 특정 모델만 분석 (gpt-oss-20b, qwen3-4b)
+python3 scripts/analyze.py results/local --models gpt-oss-20b qwen3-4b
+
+# 분산 결과 병합 + 분석 (특정 모델만)
+python3 scripts/analyze.py --merge results/server* --models qwen3-4b deepseek-r1-7b
+
+# 모델 비교
+python3 scripts/analyze.py --compare results/model1 results/model2
+```
+
+---
+
+## 🔧 고급 옵션
+
+### 실험 스크립트 옵션
+
+```bash
+python3 scripts/run_experiment.py --help
+
+주요 옵션:
+  --quick                  빠른 테스트 (3개 케이스, C4만)
+  --distributed ID N TOTAL  분산 실험 모드
+  --dataset {zeroday,vulnfix}
+  --limit N                처리할 케이스 수
+  --models MODEL [MODEL ...]
+  --conditions {c1,c2,c3,c4} [...]
+  --skip-incomplete-patches  RQ2 패치 생성 건너뛰기
+  --output DIR             출력 디렉토리
+```
+
+### 분석 스크립트 옵션
+
+```bash
+python3 scripts/analyze.py --help
+
+주요 옵션:
+  --merge                  분산 결과 병합
+  --compare                다중 모델 비교
+  -o, --output DIR         출력 디렉토리
+  -q, --quiet              최소 출력
+```
+
+---
+
+## 📄 라이선스
+
+이 프로젝트는 연구 목적으로 개발되었습니다.
+
+---
+
+## 📮 문의
+
+프로젝트 관련 문의사항이나 버그 리포트는 이슈를 등록해주세요.
