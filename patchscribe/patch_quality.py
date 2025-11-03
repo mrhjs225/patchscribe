@@ -4,6 +4,7 @@ GPT-based patch quality evaluation utilities.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -11,6 +12,21 @@ from .llm import LLMClient, LLMUnavailable
 from .formal_spec import FormalBugExplanation, FormalPatchExplanation
 from .patch import PatchResult
 from .verification import VerificationResult
+
+TEXTUAL_SCORE_HINTS: Dict[str, float] = {
+    # Common qualitative descriptors some LLMs return instead of numeric scores.
+    "safe": 5.0,
+    "unsafe": 0.0,
+    "secure": 5.0,
+    "insecure": 0.0,
+    "complete": 5.0,
+    "incomplete": 1.0,
+    "high": 4.0,
+    "medium": 3.0,
+    "low": 2.0,
+    "pass": 5.0,
+    "fail": 0.0,
+}
 
 
 @dataclass
@@ -58,10 +74,10 @@ class PatchQualityEvaluator:
             return PatchQualityEvaluation(scores={}, verdict="LLM returned non-JSON", raw=response)
 
         scores = {
-            "safety": float(payload.get("safety", 0.0)),
-            "completeness": float(payload.get("completeness", 0.0)),
-            "regression_risk": float(payload.get("regression_risk", 0.0)),
-            "explanation_alignment": float(payload.get("explanation_alignment", 0.0)),
+            "safety": self._extract_score(payload, "safety"),
+            "completeness": self._extract_score(payload, "completeness"),
+            "regression_risk": self._extract_score(payload, "regression_risk"),
+            "explanation_alignment": self._extract_score(payload, "explanation_alignment"),
         }
         verdict = payload.get("verdict", "")
         return PatchQualityEvaluation(scores=scores, verdict=verdict, raw=response)
@@ -96,6 +112,46 @@ class PatchQualityEvaluator:
             except json.JSONDecodeError:
                 continue
         return None
+
+    @staticmethod
+    def _extract_score(payload: Dict[str, object], key: str) -> float:
+        """
+        LLMs occasionally nest scores inside helper objects such as {"score": 4.0, "reason": "..."}.
+        This normalizes the value back into a float so downstream consumers do not crash.
+        """
+        value: object = payload.get(key)
+        if value is None:
+            scores_section = payload.get("scores")
+            if isinstance(scores_section, dict):
+                value = scores_section.get(key)
+
+        if isinstance(value, dict):
+            for nested_key in ("score", "value", "rating"):
+                nested_value = value.get(nested_key)
+                if nested_value is not None:
+                    value = nested_value
+                    break
+
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if not normalized:
+                return 0.0
+
+            if normalized in TEXTUAL_SCORE_HINTS:
+                return TEXTUAL_SCORE_HINTS[normalized]
+
+            match = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", normalized)
+            if match:
+                try:
+                    return float(match.group())
+                except ValueError:
+                    pass
+            return 0.0
+
+        return 0.0
 
     def _build_prompt(
         self,

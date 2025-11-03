@@ -13,7 +13,6 @@ DATASET=${4:-zeroday}
 # 테스트할 모델 리스트 (필요에 따라 수정)
 MODELS=(
     "ollama:qwen3:14b"
-    "ollama:qwen3:14b"
     "ollama:qwen3:8b"
     "ollama:qwen3:4b"
     "ollama:qwen3:1.7b"
