@@ -141,3 +141,19 @@ class ExplanationEvaluator:
             + f"Metadata: {metadata}\n"
             + f"Explanation text:\n{explanation}"
         )
+
+    def _build_judge_prompt(self, explanation: str, case: Dict[str, object]) -> str:
+        """Public wrapper for building judge prompts (used by batch_judge script)"""
+        return self._llm_judge_prompt(explanation, case)
+
+    def _parse_llm_scores(self, response: str) -> Dict[str, float]:
+        """Parse LLM judge response into scores (used by batch_judge script)"""
+        try:
+            parsed = json.loads(response)
+            return {
+                "accuracy": float(parsed.get("accuracy", 0.0)),
+                "clarity": float(parsed.get("clarity", 0.0)),
+                "causality": float(parsed.get("causality", 0.0)),
+            }
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return {}

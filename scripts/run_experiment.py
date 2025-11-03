@@ -652,6 +652,17 @@ def main():
         action='store_true',
         help='불완전 패치 생성 건너뛰기'
     )
+    parser.add_argument(
+        '--batch-judge',
+        action='store_true',
+        help='배치 모드로 GPT Judge 평가 (병렬 처리, 속도 향상)'
+    )
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=5,
+        help='배치 모드의 동시 요청 수 (기본값: 5)'
+    )
 
     # Output
     parser.add_argument(

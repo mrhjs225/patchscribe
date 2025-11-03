@@ -1447,16 +1447,19 @@ Examples:
 1. Analyze single result file:
    python3 scripts/analyze.py results/local/qwen3-4b/c4_results.json
 
-2. Analyze entire directory:
+2. Analyze entire directory (C4 only by default):
    python3 scripts/analyze.py results/local
 
-3. Merge distributed results and analyze:
+3. Analyze all conditions (C1-C4 ablation study):
+   python3 scripts/analyze.py results/local --all-conditions
+
+4. Merge distributed results and analyze:
    python3 scripts/analyze.py --merge results/server*
 
-4. Compare multiple models:
+5. Compare multiple models:
    python3 scripts/analyze.py --compare results/model1 results/model2
 
-5. Filter specific models:
+6. Filter specific models:
    python3 scripts/analyze.py results/local --models qwen3-4b deepseek-r1-7b
 
 Output:
@@ -1464,6 +1467,10 @@ Output:
   - Markdown summary report
   - Multi-model comparison (if applicable)
   - Console summary statistics
+
+Note:
+  - Default: Only C4 (full PatchScribe) is analyzed
+  - Use --all-conditions to analyze C1-C4 for ablation study
         """
     )
 
@@ -1502,6 +1509,12 @@ Output:
         '--models',
         nargs='+',
         help='Filter models to analyze (e.g., --models qwen3-4b deepseek-r1-7b)'
+    )
+
+    parser.add_argument(
+        '--all-conditions',
+        action='store_true',
+        help='Analyze all conditions (C1-C4). Default: only C4 (full PatchScribe)'
     )
 
     args = parser.parse_args()
@@ -1565,26 +1578,47 @@ Output:
                     elif verbose and model_filter:
                         print(f"⏭️  Skipping {model_name} (filtered out)")
 
-                # Directory - find all C4 results
+                # Directory - find result files
                 elif input_path.is_dir():
-                    c4_files = list(input_path.glob("**/c4_*results.json"))
+                    # Determine which conditions to analyze
+                    if args.all_conditions:
+                        conditions = ['c1', 'c2', 'c3', 'c4']
+                    else:
+                        conditions = ['c4']  # Only full PatchScribe by default
 
-                    if not c4_files:
+                    # Find result files
+                    result_files = []
+                    for condition in conditions:
+                        result_files.extend(input_path.glob(f"**/{condition}_*results.json"))
+
+                    if not result_files:
                         if verbose:
-                            print(f"⚠️  No C4 results found in {input_path}")
+                            cond_str = "C1-C4" if args.all_conditions else "C4"
+                            print(f"⚠️  No {cond_str} result files found in {input_path}")
                         continue
 
-                    for c4_file in c4_files:
-                        model_name = c4_file.parent.name
-                        if should_include_model(model_name, model_filter):
-                            analyzer = RQAnalyzer(c4_file)
-                            analyzer.generate_comprehensive_report(verbose=verbose)
-                            results_analyzed += 1
-                        elif verbose and model_filter:
-                            print(f"⏭️  Skipping {model_name} (filtered out)")
+                    # Group by model and analyze
+                    models_analyzed = set()
+                    for result_file in sorted(result_files):
+                        model_name = result_file.parent.name
 
-                    # Auto-generate comparison if multiple models
-                    if results_analyzed > 1:
+                        # Apply model filter
+                        if not should_include_model(model_name, model_filter):
+                            if verbose and model_filter and model_name not in models_analyzed:
+                                print(f"⏭️  Skipping {model_name} (filtered out)")
+                            continue
+
+                        if verbose:
+                            condition = result_file.stem.split('_')[0]
+                            print(f"\n📊 Analyzing {model_name} - {condition.upper()}")
+
+                        analyzer = RQAnalyzer(result_file)
+                        analyzer.generate_comprehensive_report(verbose=verbose)
+                        results_analyzed += 1
+                        models_analyzed.add(model_name)
+
+                    # Auto-generate comparison if multiple models analyzed
+                    if len(models_analyzed) > 1:
                         comparison_dir = input_path / "comparison"
                         generate_comparison_report([input_path], comparison_dir,
                                                   verbose, model_filter)

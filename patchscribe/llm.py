@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urljoin
 
 try:  # pragma: no cover - optional dependency
@@ -26,6 +26,10 @@ class LLMUnavailable(RuntimeError):
 DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434/api/chat"
 DEFAULT_OLLAMA_MODEL = "llama3.2:1b"
 
+# Judge model configuration (fixed to OpenAI GPT-5-mini)
+DEFAULT_JUDGE_MODEL = "gpt-5-mini"
+DEFAULT_OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+
 
 @dataclass
 class LLMConfig:
@@ -40,19 +44,36 @@ class LLMConfig:
             self.endpoint = DEFAULT_OLLAMA_ENDPOINT
 
     @classmethod
-    def from_env(cls) -> "LLMConfig":
-        provider = "ollama"
-        endpoint = os.environ.get("PATCHSCRIBE_LLM_ENDPOINT")
-        model = os.environ.get("PATCHSCRIBE_LLM_MODEL")
-        if not model:
-            model = DEFAULT_OLLAMA_MODEL
-        return cls(
-            provider=provider,
-            endpoint=endpoint,
-            api_key=os.environ.get("OPENAI_API_KEY"),
-            model=model,
-            timeout=int(os.environ.get("PATCHSCRIBE_LLM_TIMEOUT", "300")),
-        )
+    def from_env(cls, *, for_judge: bool = False) -> "LLMConfig":
+        """Create LLM config from environment variables.
+
+        Args:
+            for_judge: If True, returns config for OpenAI GPT-5-mini judge.
+                      If False, returns config for local LLM (generation).
+        """
+        if for_judge:
+            # Judge: Always use OpenAI GPT-5-mini
+            return cls(
+                provider="openai",
+                endpoint=DEFAULT_OPENAI_ENDPOINT,
+                api_key=os.environ.get("OPENAI_API_KEY"),
+                model=DEFAULT_JUDGE_MODEL,
+                timeout=int(os.environ.get("PATCHSCRIBE_JUDGE_TIMEOUT", "120")),
+            )
+        else:
+            # Generation: Use local LLM (ollama)
+            provider = "ollama"
+            endpoint = os.environ.get("PATCHSCRIBE_LLM_ENDPOINT")
+            model = os.environ.get("PATCHSCRIBE_LLM_MODEL")
+            if not model:
+                model = DEFAULT_OLLAMA_MODEL
+            return cls(
+                provider=provider,
+                endpoint=endpoint,
+                api_key=os.environ.get("OPENAI_API_KEY"),
+                model=model,
+                timeout=int(os.environ.get("PATCHSCRIBE_LLM_TIMEOUT", "300")),
+            )
 
 
 class LLMClient:
@@ -157,9 +178,19 @@ class LLMClient:
         return content.strip()
 
     def score_explanation(self, prompt: str) -> Optional[str]:
-        if not self.available():
+        """Score explanation quality using GPT-4o-mini judge.
+
+        This method always uses OpenAI GPT-4o-mini, regardless of the
+        main LLM configuration used for generation.
+        """
+        # Create separate judge client with OpenAI GPT-4o-mini
+        judge_config = LLMConfig.from_env(for_judge=True)
+        judge_client = LLMClient(judge_config)
+
+        if not judge_client.available():
             return None
-        content = self._post_chat(
+
+        content = judge_client._post_chat(
             [
                 {"role": "system", "content": self._judge_system_prompt()},
                 {"role": "user", "content": prompt},
@@ -168,10 +199,70 @@ class LLMClient:
         )
         return content.strip()
 
+    @staticmethod
+    def batch_score_explanations(prompts: List[str], *, max_workers: int = 5) -> List[Optional[str]]:
+        """Score multiple explanations in parallel using GPT-4o-mini judge.
+
+        Args:
+            prompts: List of evaluation prompts
+            max_workers: Maximum number of concurrent requests (default: 5)
+
+        Returns:
+            List of scores in the same order as prompts
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Create judge client once
+        judge_config = LLMConfig.from_env(for_judge=True)
+        judge_client = LLMClient(judge_config)
+
+        if not judge_client.available():
+            return [None] * len(prompts)
+
+        results = [None] * len(prompts)
+
+        def score_single(index: int, prompt: str) -> Tuple[int, Optional[str]]:
+            """Score a single prompt and return with its index"""
+            try:
+                content = judge_client._post_chat(
+                    [
+                        {"role": "system", "content": judge_client._judge_system_prompt()},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.0,
+                )
+                return index, content.strip()
+            except Exception as e:
+                print(f"Warning: Failed to score explanation {index}: {e}")
+                return index, None
+
+        # Execute in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(score_single, i, prompt)
+                for i, prompt in enumerate(prompts)
+            ]
+
+            for future in as_completed(futures):
+                index, score = future.result()
+                results[index] = score
+
+        return results
+
     def score_patch(self, prompt: str) -> Optional[str]:
-        if not self.available():
+        """Score patch quality using GPT-4o-mini judge.
+
+        This method always uses OpenAI GPT-4o-mini, regardless of the
+        main LLM configuration used for generation.
+        """
+        # Create separate judge client with OpenAI GPT-4o-mini
+        judge_config = LLMConfig.from_env(for_judge=True)
+        judge_client = LLMClient(judge_config)
+
+        if not judge_client.available():
             return None
-        content = self._post_chat(
+
+        content = judge_client._post_chat(
             [
                 {"role": "system", "content": self._patch_judge_system_prompt()},
                 {"role": "user", "content": prompt},
@@ -179,6 +270,56 @@ class LLMClient:
             temperature=0.0,
         )
         return content.strip()
+
+    @staticmethod
+    def batch_score_patches(prompts: List[str], *, max_workers: int = 5) -> List[Optional[str]]:
+        """Score multiple patches in parallel using GPT-4o-mini judge.
+
+        Args:
+            prompts: List of patch evaluation prompts
+            max_workers: Maximum number of concurrent requests (default: 5)
+
+        Returns:
+            List of scores in the same order as prompts
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Create judge client once
+        judge_config = LLMConfig.from_env(for_judge=True)
+        judge_client = LLMClient(judge_config)
+
+        if not judge_client.available():
+            return [None] * len(prompts)
+
+        results = [None] * len(prompts)
+
+        def score_single(index: int, prompt: str) -> Tuple[int, Optional[str]]:
+            """Score a single patch prompt and return with its index"""
+            try:
+                content = judge_client._post_chat(
+                    [
+                        {"role": "system", "content": judge_client._patch_judge_system_prompt()},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.0,
+                )
+                return index, content.strip()
+            except Exception as e:
+                print(f"Warning: Failed to score patch {index}: {e}")
+                return index, None
+
+        # Execute in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(score_single, i, prompt)
+                for i, prompt in enumerate(prompts)
+            ]
+
+            for future in as_completed(futures):
+                index, score = future.result()
+                results[index] = score
+
+        return results
 
     def _post_chat(self, messages: List[Dict[str, str]], *, temperature: float) -> str:
         payload = self._build_payload(messages, temperature=temperature)
