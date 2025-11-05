@@ -1388,9 +1388,13 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
 
     # Expected outcomes analysis (from paper)
     if has_conditions and len(sorted_models) > 0:
-        avg_c1 = statistics.mean([d.get('c1_success_rate', 0) for d in all_results.values() if d.get('c1_success_rate', 0) > 0])
-        avg_c3 = statistics.mean([d.get('c3_success_rate', 0) for d in all_results.values() if d.get('c3_success_rate', 0) > 0])
-        avg_c4 = statistics.mean([d['metrics']['success_rate'] for d in all_results.values()])
+        c1_rates = [d.get('c1_success_rate', 0) for d in all_results.values() if d.get('c1_success_rate', 0) > 0]
+        c3_rates = [d.get('c3_success_rate', 0) for d in all_results.values() if d.get('c3_success_rate', 0) > 0]
+        c4_rates = [d['metrics']['success_rate'] for d in all_results.values() if d['metrics']['success_rate'] > 0]
+
+        avg_c1 = statistics.mean(c1_rates) if c1_rates else 0.0
+        avg_c3 = statistics.mean(c3_rates) if c3_rates else 0.0
+        avg_c4 = statistics.mean(c4_rates) if c4_rates else 0.0
 
         if avg_c1 > 0:
             c3_improvement = ((avg_c3 - avg_c1) / avg_c1 * 100)

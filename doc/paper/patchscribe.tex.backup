@@ -37,11 +37,11 @@ Critically, the formal bug specification is generated before patching,
 providing precise guidance to the LLM (e.g., ``$V_{\text{overflow}}
 \Leftrightarrow (len > 256) \land (\lnot Check)$; to fix, ensure Check =
 true or $len \leq 256$'') rather than vague hints. After patch
-generation, we perform dual verification by comparing E\_bug and E\_patch
-through multi-stage checks: (1) consistency checking to ensure E\_patch
-addresses all causes identified in E\_bug, (2) symbolic verification to
-prove the vulnerability is unreachable in the patched code, and
-(3) completeness checking to ensure all causal paths are disrupted. We outline the three-phase design
+generation, we perform
+triple verification: (1) consistency checking to ensure E\_patch
+addresses causes identified in E\_bug, (2) symbolic verification to
+prove the vulnerability is unreachable, and (3) completeness checking to
+ensure all causal paths are disrupted. We outline the three-phase design
 of PatchScribe (Vulnerability Formalization, Theory-Guided Patch
 Generation, Dual Verification) and present an evaluation plan on recent
 vulnerability repair benchmarks. Our approach transforms patch
@@ -98,20 +98,6 @@ the intervention actually addresses the causes identified in E\_bug.
 This dual-explanation approach catches incomplete fixes that might pass
 exploit tests but miss edge cases.
 
-\paragraph{Terminology.}
-We refer to our approach as \emph{dual verification} because it verifies
-consistency between two formal explanations: E\_bug (the formal specification
-of the vulnerability's root cause) and E\_patch (the formal specification of
-how the patch eliminates it). This distinguishes our work from prior approaches
-that verify only the patch itself without a formal bug specification to compare
-against. Within dual verification, we employ \emph{multi-stage verification}
-consisting of three complementary stages: (1) consistency checking (four
-sub-checks ensuring E\_patch addresses all causes identified in E\_bug),
-(2) symbolic verification (proving unreachability via KLEE/angr), and
-(3) completeness verification (ensuring all causal paths are disrupted).
-This multi-stage approach provides defense-in-depth: even if one stage
-produces a false negative, others can catch incomplete patches.
-
 In this paper, we introduce PatchScribe, a framework that brings
 theory-guided causal reasoning to LLM-based vulnerability repair. Unlike
 prior approaches that explain patches post-hoc, PatchScribe follows a
@@ -126,11 +112,11 @@ formal specification is provided to the LLM as guidance, enabling it to
 generate more targeted patches. After patch generation, we analyze how
 the patch intervenes on the causal model and generate a formal patch
 explanation (E\_patch) describing what changed and why the vulnerability
-is eliminated. We then perform dual verification—comparing E\_bug and
-E\_patch—through multiple stages: (1) consistency checking (does the
-patch address identified causes?), (2) symbolic verification (is the
-vulnerability provably unreachable?), and (3) completeness checking
-(are all causal paths disrupted?). This three-phase approach (Formalization \(\rightarrow\) Theory-Guided
+is eliminated. We then perform triple verification: (1) consistency
+checking between E\_bug and E\_patch (does the patch address identified
+causes?), (2) symbolic verification (is the vulnerability provably
+unreachable?), and (3) completeness checking (are all causal paths
+disrupted?). This three-phase approach (Formalization \(\rightarrow\) Theory-Guided
 Generation \(\rightarrow\) Dual Verification) provides stronger guarantees than prior
 work, catching cases where patches superficially appear correct but fail
 to address the root cause.
@@ -607,15 +593,14 @@ generate a \textbf{formal patch explanation (E\_patch)} describing the
 intervention, its effect on V\_bug, and which causal paths are
 disrupted.
 
-\textbf{Phase 3: Dual Verification} - We verify consistency between
-E\_bug and E\_patch through multi-stage verification:
-(1) \textbf{Consistency Checking} to ensure E\_patch addresses the causes
-identified in E\_bug (four sub-checks: causal coverage, intervention validity,
-logical consistency, completeness), (2) \textbf{Symbolic Verification} to
-prove the vulnerability condition is unreachable in the patched program
-(using KLEE/angr), and (3) \textbf{Completeness Verification} to ensure
-all causal paths are disrupted. This multi-stage verification provides
-stronger guarantees than prior single-stage approaches.
+\textbf{Phase 3: Dual Verification} - We perform three types of
+verification: (1) \textbf{Consistency checking} to ensure the patch
+explanation addresses the causes stated in the bug explanation (does
+E\_patch actually handle what E\_bug identified?), (2) \textbf{Symbolic
+verification} to prove the vulnerability condition is unreachable in the
+patched program, and (3) \textbf{Completeness checking} to ensure all
+identified causes are properly handled. This triple verification
+provides stronger guarantees than prior work.
 
 This approach ensures that patches are not only verified to work, but
 that we understand and can formally prove \emph{why} they work in terms
@@ -1262,9 +1247,9 @@ compared to traditional approaches?
 
 \textbf{RQ2: Dual Verification Effectiveness} -- How effective is the
 dual explanation approach ($E_{\text{bug}} \leftrightarrow E_{\text{patch}}$) with consistency checking
-at detecting incomplete patches? Does multi-stage verification (consistency
-checking + symbolic verification + completeness analysis) provide stronger
-guarantees than exploit-only testing or symbolic execution alone?
+at detecting incomplete patches? Does triple verification (consistency +
+symbolic + completeness) provide stronger guarantees than exploit-only
+testing or symbolic execution alone?
 
 \textbf{RQ3: Scalability and Performance} -- What is the time overhead
 of the three-phase workflow (formalization, theory-guided generation,
@@ -1301,7 +1286,7 @@ guidance quality. We conduct an ablation study with four conditions: C1
 (post-hoc: raw LLM with no formal guidance), C2 (vague hints: informal
 prompts like ``add a check''), C3 (pre-hoc guidance: E\_bug
 specification without verification), and C4 (full PatchScribe with
-E\_bug and multi-stage verification). Comparing C3 vs C1 isolates the effect
+E\_bug and triple verification). Comparing C3 vs C1 isolates the effect
 of pre-hoc formalization, while C4 vs C3 shows the additional value of
 dual verification.
 
@@ -1316,7 +1301,7 @@ completeness checking agree. To evaluate detection capability, we inject
 only positive values but missing negative, or patching one path while
 missing another). We compare four verification methods: V1 (exploit-only
 testing), V2 (symbolic execution only), V3 (consistency checking only),
-and V4 (multi-stage verification). The key metric is precision and recall in
+and V4 (triple verification). The key metric is precision and recall in
 detecting incomplete patches, with ground truth established through
 manual expert review and variant exploit generation.
 
@@ -1359,7 +1344,7 @@ For RQ2, we expect consistency checking to catch 3-5 incomplete patches
 that would pass exploit-only testing. These cases will illustrate
 scenarios where the original exploit is blocked but variant exploits
 remain possible, or where the patch addresses one causal path but misses
-others identified in E\_bug. We anticipate multi-stage verification (V4) to
+others identified in E\_bug. We anticipate triple verification (V4) to
 achieve \textasciitilde90\% precision and \textasciitilde80\% recall in
 detecting incomplete patches, significantly outperforming exploit-only
 testing (V1: \textasciitilde60\% precision, \textasciitilde50\% recall).

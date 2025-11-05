@@ -766,7 +766,7 @@ python3 scripts/batch_judge.py results/local/ --quiet
    - `llm_scores` 없음
 
 2. **배치 평가 실행**:
-   - GPT-4o-mini judge로 병렬 평가
+   - gpt-5 judge로 병렬 평가
    - ThreadPoolExecutor 사용
    - 순서 보장 (index 기반)
 
@@ -841,7 +841,7 @@ export PATCHSCRIBE_JUDGE_TIMEOUT=180
    - `--batch-size 10-20` 권장
    - Rate limit 초과 시 `--batch-size` 줄이기
 
-3. **비용**: GPT-4o-mini는 저렴하지만 대량 평가 시 비용 확인 필요
+3. **비용**: gpt-5는 저렴하지만 대량 평가 시 비용 확인 필요
 
 4. **실패 처리**: 개별 케이스 실패 시 경고만 출력, 계속 진행
 

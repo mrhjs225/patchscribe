@@ -32,6 +32,13 @@ from dataclasses import dataclass
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from patchscribe.llm import (
+    DEFAULT_GEMINI_ENDPOINT_TEMPLATE,
+    DEFAULT_GEMINI_MODEL as LLM_DEFAULT_GEMINI_MODEL,
+    DEFAULT_OLLAMA_ENDPOINT,
+    DEFAULT_OPENAI_ENDPOINT,
+)
+
 
 # 전체 실험 대상 모델 리스트 (16개)
 DEFAULT_MODELS = [
@@ -52,6 +59,81 @@ DEFAULT_MODELS = [
     "deepseek-r1:1.5b",
     "qwen3:0.6b",
 ]
+
+DEFAULT_VLLM_MODEL = "openai/gpt-oss-120b"
+DEFAULT_VLLM_ENDPOINT = "http://115.145.135.227:7220/v1/chat/completions"
+OPENAI_MODELS = [
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "gpt-4.1-mini",
+    "o3-mini",
+]
+ANTHROPIC_MODELS = [
+    "claude-haiku-4-5",
+    "claude-sonnet-4-5",
+]
+GEMINI_MODELS = [
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-1.5-pro-latest",
+    "gemini-1.5-flash-latest",
+]
+
+DEFAULT_OPENAI_MODEL = OPENAI_MODELS[1]  # gpt-5-mini
+DEFAULT_ANTHROPIC_MODEL = ANTHROPIC_MODELS[0]  # claude-haiku-4-5
+DEFAULT_ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
+DEFAULT_LLM_MAX_TOKENS = 2048
+DEFAULT_GEMINI_MODEL = LLM_DEFAULT_GEMINI_MODEL
+
+CONCURRENCY_ALLOWED_MODELS = {
+    'openai': set(OPENAI_MODELS),
+    'anthropic': set(ANTHROPIC_MODELS),
+    'gemini': {"gemini-2.5-pro", "gemini-2.5-flash"},
+}
+
+
+def select_default_models(provider: str, *, quick: bool = False) -> List[str]:
+    """Return provider-aware default model list."""
+    provider = (provider or "ollama").lower()
+    if provider == 'ollama':
+        return [DEFAULT_MODELS[0]] if quick else list(DEFAULT_MODELS)
+    if provider == 'vllm':
+        return [DEFAULT_VLLM_MODEL]
+    if provider == 'openai':
+        return [DEFAULT_OPENAI_MODEL] if quick else list(OPENAI_MODELS)
+    if provider == 'anthropic':
+        return [DEFAULT_ANTHROPIC_MODEL] if quick else list(ANTHROPIC_MODELS)
+    if provider == 'gemini':
+        return [DEFAULT_GEMINI_MODEL] if quick else list(GEMINI_MODELS)
+    return [DEFAULT_MODELS[0]] if quick else list(DEFAULT_MODELS)
+
+
+def print_llm_settings(llm_config: Dict[str, object]) -> None:
+    """Pretty-print LLM runtime settings."""
+    provider = llm_config.get('provider', 'ollama')
+    endpoint = llm_config.get('endpoint') or 'N/A'
+    timeout = llm_config.get('timeout')
+    max_tokens = llm_config.get('max_tokens')
+    concurrency = llm_config.get('concurrency')
+    provider_key = (provider or '').lower()
+    model_whitelist = CONCURRENCY_ALLOWED_MODELS.get(provider_key, set())
+
+    print(f"  LLM provider: {provider}")
+    print(f"  LLM endpoint: {endpoint}")
+    if timeout:
+        print(f"  LLM timeout: {timeout}s")
+    if max_tokens and provider in {'anthropic', 'gemini'}:
+        print(f"  LLM max_tokens: {max_tokens}")
+    if concurrency and model_whitelist:
+        enabled = ', '.join(sorted(model_whitelist))
+        print(f"  LLM concurrency: {concurrency} (enabled for {enabled})")
+    if provider_key == 'openai':
+        print(f"  Available OpenAI models: {', '.join(OPENAI_MODELS)}")
+    elif provider_key == 'anthropic':
+        print(f"  Available Claude models: {', '.join(ANTHROPIC_MODELS)}")
+    elif provider_key == 'gemini':
+        print(f"  Available Gemini models: {', '.join(GEMINI_MODELS)}")
 
 
 # ============================================================================
@@ -318,6 +400,8 @@ def run_single_evaluation(
     model_spec: str,
     condition: str,
     output_file: Path,
+    *,
+    llm_config: Dict[str, object],
     verbose: bool = True
 ) -> Dict:
     """단일 모델 × 조건에 대한 평가 실행"""
@@ -334,10 +418,58 @@ def run_single_evaluation(
         # "qwen3:14b" -> "qwen3:14b"
         model_name = model_spec
 
-    # 환경 변수 설정 (모든 모델은 ollama 사용)
-    os.environ['PATCHSCRIBE_LLM_PROVIDER'] = 'ollama'
+    provider = (llm_config.get('provider') or 'ollama').lower()
+    endpoint = llm_config.get('endpoint')
+    timeout = llm_config.get('timeout')
+    max_tokens = llm_config.get('max_tokens')
+    concurrency = llm_config.get('concurrency')
+    model_basename = model_name.split('/')[-1] if model_name else model_name
+    concurrency_allowed = (
+        provider == 'openai' and model_basename in CONCURRENCY_ALLOWED_MODELS.get('openai', set())
+    ) or (
+        provider == 'anthropic' and model_basename in CONCURRENCY_ALLOWED_MODELS.get('anthropic', set())
+    ) or (
+        provider == 'gemini' and model_basename in CONCURRENCY_ALLOWED_MODELS.get('gemini', set())
+    )
+
+    # 환경 변수 설정 (provider 별로 동작)
+    if provider == 'gemini':
+        endpoint = DEFAULT_GEMINI_ENDPOINT_TEMPLATE.format(model=model_name)
+
+    os.environ['PATCHSCRIBE_LLM_PROVIDER'] = provider
     os.environ['PATCHSCRIBE_LLM_MODEL'] = model_name
-    os.environ['PATCHSCRIBE_LLM_ENDPOINT'] = 'http://localhost:11434/api/chat'
+
+    if endpoint:
+        os.environ['PATCHSCRIBE_LLM_ENDPOINT'] = str(endpoint)
+    elif 'PATCHSCRIBE_LLM_ENDPOINT' in os.environ:
+        del os.environ['PATCHSCRIBE_LLM_ENDPOINT']
+
+    if timeout is not None:
+        os.environ['PATCHSCRIBE_LLM_TIMEOUT'] = str(timeout)
+    elif 'PATCHSCRIBE_LLM_TIMEOUT' in os.environ:
+        del os.environ['PATCHSCRIBE_LLM_TIMEOUT']
+
+    if max_tokens is not None:
+        os.environ['PATCHSCRIBE_LLM_MAX_TOKENS'] = str(max_tokens)
+    elif 'PATCHSCRIBE_LLM_MAX_TOKENS' in os.environ:
+        del os.environ['PATCHSCRIBE_LLM_MAX_TOKENS']
+
+    # concurrency는 지원되는 모델에서만 사용
+    evaluator_kwargs: Dict[str, object] = {}
+    if provider in {'ollama', 'vllm'}:
+        evaluator_kwargs['max_workers'] = 1
+        if concurrency and verbose:
+            print("    ⚠️ LLM concurrency is not supported for this provider; running sequentially.")
+    elif concurrency and concurrency_allowed:
+        evaluator_kwargs['max_workers'] = max(1, int(concurrency))
+    else:
+        evaluator_kwargs['max_workers'] = 1
+        if concurrency and verbose and not concurrency_allowed:
+            allowed = ', '.join(sorted(CONCURRENCY_ALLOWED_MODELS.get(provider, set())))
+            if allowed:
+                print(f"    ⚠️ LLM concurrency ignored (supported models: {allowed}).")
+            else:
+                print("    ⚠️ LLM concurrency ignored (no supported models for this provider).")
 
     # 조건별 설정
     strategy, enable_consistency = get_condition_settings(condition)
@@ -357,7 +489,7 @@ def run_single_evaluation(
     )
 
     # 평가 실행
-    evaluator = Evaluator(pipeline=pipeline)
+    evaluator = Evaluator(pipeline=pipeline, max_workers=evaluator_kwargs.get('max_workers'))
     report = evaluator.run(cases)
 
     # 결과 저장
@@ -421,6 +553,7 @@ def run_experiment(
     models: List[str],
     conditions: List[str],
     output_dir: Path,
+    llm_config: Dict[str, object],
     start_index: int = 0,
     limit: int = None,
     generate_incomplete: bool = True,
@@ -481,7 +614,12 @@ def run_experiment(
 
             try:
                 result = run_single_evaluation(
-                    cases, model_spec, condition, output_file, verbose
+                    cases,
+                    model_spec,
+                    condition,
+                    output_file,
+                    llm_config=llm_config,
+                    verbose=verbose
                 )
                 model_results['conditions'][condition] = {
                     'success_rate': result['metrics'].get('success_rate', 0),
@@ -680,6 +818,33 @@ def main():
         help='배치 모드의 동시 요청 수 (기본값: 5)'
     )
 
+    # LLM configuration
+    parser.add_argument(
+        '--llm-provider',
+        choices=['ollama', 'vllm', 'openai', 'anthropic', 'gemini'],
+        default='ollama',
+        help='패치 생성을 위한 LLM 제공자 선택 (기본값: ollama)'
+    )
+    parser.add_argument(
+        '--llm-endpoint',
+        help='LLM 엔드포인트 URL (미지정 시 제공자별 기본값 사용)'
+    )
+    parser.add_argument(
+        '--llm-timeout',
+        type=int,
+        help='LLM HTTP 요청 타임아웃 (초 단위, 기본값: 300)'
+    )
+    parser.add_argument(
+        '--llm-max-tokens',
+        type=int,
+        help='LLM max_tokens 설정 (Anthropic/Gemini 호출 시 권장, 기본값: 2048)'
+    )
+    parser.add_argument(
+        '--llm-concurrency',
+        type=int,
+        help='LLM 동시 요청 수 (OpenAI, Claude, Gemini 지원 모델에만 적용)'
+    )
+
     # Output
     parser.add_argument(
         '--output',
@@ -694,10 +859,38 @@ def main():
 
     args = parser.parse_args()
 
+    llm_config = {
+        'provider': args.llm_provider,
+        'endpoint': args.llm_endpoint,
+        'timeout': args.llm_timeout,
+        'max_tokens': args.llm_max_tokens if args.llm_max_tokens is not None else None,
+        'concurrency': args.llm_concurrency if args.llm_concurrency is not None else None,
+    }
+
+    if not llm_config['endpoint']:
+        if args.llm_provider == 'ollama':
+            llm_config['endpoint'] = DEFAULT_OLLAMA_ENDPOINT
+        elif args.llm_provider == 'vllm':
+            llm_config['endpoint'] = DEFAULT_VLLM_ENDPOINT
+        elif args.llm_provider == 'openai':
+            llm_config['endpoint'] = DEFAULT_OPENAI_ENDPOINT
+        elif args.llm_provider == 'anthropic':
+            llm_config['endpoint'] = DEFAULT_ANTHROPIC_ENDPOINT
+        elif args.llm_provider == 'gemini':
+            model_for_endpoint = None
+            if args.models and len(args.models) == 1:
+                model_for_endpoint = args.models[0].split(':', 1)[-1]
+            llm_config['endpoint'] = DEFAULT_GEMINI_ENDPOINT_TEMPLATE.format(
+                model=model_for_endpoint or DEFAULT_GEMINI_MODEL
+            )
+
+    if llm_config['max_tokens'] is None and args.llm_provider in {'anthropic', 'gemini'}:
+        llm_config['max_tokens'] = DEFAULT_LLM_MAX_TOKENS
+
     # Configure based on mode
     if args.quick:
         # Quick test mode
-        models = args.models if args.models else [DEFAULT_MODELS[0]]
+        models = args.models if args.models else select_default_models(args.llm_provider, quick=True)
         conditions = args.conditions if args.conditions else ['c4']
         limit = 3
         offset = 0
@@ -705,6 +898,7 @@ def main():
         server_id = None
 
         print_header("Quick Test Mode")
+        print_llm_settings(llm_config)
         print(f"  Testing 3 cases with {models[0]}, condition C4")
 
     elif args.distributed:
@@ -713,7 +907,7 @@ def main():
         num_servers = int(args.distributed[1])
         total_cases = int(args.distributed[2])
 
-        models = args.models if args.models else DEFAULT_MODELS
+        models = args.models if args.models else select_default_models(args.llm_provider)
         conditions = args.conditions if args.conditions else ['c1', 'c2', 'c3', 'c4']
 
         # Calculate case allocation
@@ -722,13 +916,14 @@ def main():
         output_dir = args.output if args.output else Path(f'results/server{server_id}')
 
         print_header(f"Distributed Mode - Server {server_id}")
+        print_llm_settings(llm_config)
         print(f"  Total servers: {num_servers}")
         print(f"  Total cases: {total_cases}")
         print(f"  This server: cases {offset} to {offset + limit - 1} ({limit} cases)")
 
     else:
         # Local mode
-        models = args.models if args.models else DEFAULT_MODELS
+        models = args.models if args.models else select_default_models(args.llm_provider)
         conditions = args.conditions if args.conditions else ['c1', 'c2', 'c3', 'c4']
         limit = args.limit
         offset = args.offset
@@ -736,6 +931,7 @@ def main():
         server_id = None
 
         print_header("Local Experiment Mode")
+        print_llm_settings(llm_config)
         if limit:
             print(f"  Processing {limit} cases")
         else:
@@ -751,6 +947,7 @@ def main():
             models=models,
             conditions=conditions,
             output_dir=output_dir,
+            llm_config=llm_config,
             start_index=offset,
             limit=limit,
             generate_incomplete=not args.skip_incomplete_patches,
