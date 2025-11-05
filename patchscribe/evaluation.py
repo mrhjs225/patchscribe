@@ -14,7 +14,7 @@ except ImportError:
     tqdm = None
 
 from .pipeline import PatchScribePipeline, PipelineArtifacts
-from .llm import LLMConfig
+from .llm import LLMConfig, LLMClient
 
 
 @dataclass
@@ -77,8 +77,12 @@ class Evaluator:
         self,
         pipeline: PatchScribePipeline | None = None,
         max_workers: int | None = None,
+        enable_judge: bool = False,
+        judge_batch_size: int = 5,
     ) -> None:
         self.pipeline = pipeline or PatchScribePipeline()
+        self.enable_judge = enable_judge
+        self.judge_batch_size = judge_batch_size
         config = LLMConfig.from_env()
 
         # Ollama는 병렬 요청을 제대로 처리하지 못하므로 항상 순차 실행
@@ -332,8 +336,111 @@ class Evaluator:
         순차 실행이 필요한 경우 max_workers=1로 설정.
         """
         if self.max_workers <= 1:
-            return self.run_sequential(cases)
-        return self.run_parallel(cases)
+            report = self.run_sequential(cases)
+        else:
+            report = self.run_parallel(cases)
+
+        # Apply judge evaluation if enabled
+        if self.enable_judge:
+            report = self._apply_judge_evaluation(report)
+
+        return report
+
+    def _apply_judge_evaluation(self, report: EvaluationReport) -> EvaluationReport:
+        """Apply LLM judge evaluation to all cases with explanations."""
+        import json
+
+        if not report.cases:
+            return report
+
+        print(f"\nRunning LLM Judge evaluation on {len(report.cases)} cases...")
+
+        # Build prompts for all cases
+        prompts = []
+        valid_indices = []
+
+        for idx, case_eval in enumerate(report.cases):
+            explanations = case_eval.explanations
+            ebug = explanations.get("E_bug")
+            epatch = explanations.get("E_patch")
+
+            # Skip if explanations are not available
+            if not ebug or not epatch:
+                continue
+
+            # Extract text from E_bug and E_patch
+            ebug_text = ebug.get("text", "") if isinstance(ebug, dict) else str(ebug)
+            epatch_text = epatch.get("text", "") if isinstance(epatch, dict) else str(epatch)
+
+            if not ebug_text or not epatch_text:
+                continue
+
+            # Get case data from iterations
+            if not case_eval.iterations:
+                continue
+
+            first_iter = case_eval.iterations[0]
+            original_code = first_iter.get("original_code", "")
+            vulnerability_sig = first_iter.get("vulnerability_signature", "")
+            patched_code = first_iter.get("patched_code", "")
+
+            if not original_code or not patched_code:
+                continue
+
+            # Build judge prompt
+            prompt = LLMClient.build_explanation_judge_prompt(
+                ebug_text=ebug_text,
+                epatch_text=epatch_text,
+                vulnerability_signature=vulnerability_sig,
+                original_code=original_code,
+                patched_code=patched_code,
+            )
+
+            prompts.append(prompt)
+            valid_indices.append(idx)
+
+        if not prompts:
+            print("  ⚠️  No valid explanations to evaluate")
+            return report
+
+        print(f"  Evaluating {len(prompts)} cases with GPT-5 judge (batch size: {self.judge_batch_size})...")
+
+        # Batch evaluate
+        scores = LLMClient.batch_score_explanations(prompts, max_workers=self.judge_batch_size)
+
+        # Parse scores and update case evaluations
+        success_count = 0
+        for idx, score_text in zip(valid_indices, scores):
+            if not score_text:
+                continue
+
+            try:
+                # Parse JSON response
+                score_data = json.loads(score_text)
+
+                # Update explanation_metrics
+                case_eval = report.cases[idx]
+                if "llm_scores" not in case_eval.explanation_metrics:
+                    case_eval.explanation_metrics["llm_scores"] = {}
+
+                case_eval.explanation_metrics["llm_scores"].update({
+                    "accuracy": float(score_data.get("accuracy", 0)),
+                    "completeness": float(score_data.get("completeness", 0)),
+                    "clarity": float(score_data.get("clarity", 0)),
+                    "causality": float(score_data.get("causality", 0)),
+                    "reasoning": score_data.get("reasoning", ""),
+                })
+                success_count += 1
+            except (json.JSONDecodeError, ValueError, KeyError) as e:
+                print(f"  ⚠️  Failed to parse judge response for case {case_eval.case_id}: {e}")
+                continue
+
+        print(f"  ✅ Successfully evaluated {success_count}/{len(prompts)} cases")
+
+        # Recalculate metrics
+        report.metrics = self._compute_metrics(report.cases)
+
+        return report
 
 
 def _effect_rate(evaluations: Iterable[CaseEvaluation]) -> float:

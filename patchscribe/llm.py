@@ -765,3 +765,55 @@ class LLMClient:
                 return "\n".join(lines[1:])
             return "\n".join(lines[1:end_index])
         return content.strip()
+
+    @staticmethod
+    def build_explanation_judge_prompt(
+        ebug_text: str,
+        epatch_text: str,
+        vulnerability_signature: str,
+        original_code: str,
+        patched_code: str,
+    ) -> str:
+        """Build prompt for judging explanation quality (E_bug and E_patch).
+
+        Returns a prompt that asks the judge to evaluate:
+        - Accuracy: Technical correctness of the explanation
+        - Completeness: Coverage of key vulnerability aspects
+        - Clarity: Understandability and structure
+        - Causality: Quality of causal reasoning
+        """
+        return f"""Evaluate the quality of the following vulnerability explanations.
+
+**Vulnerability Signature:** {vulnerability_signature}
+
+**Original Code:**
+```c
+{original_code.strip()}
+```
+
+**Patched Code:**
+```c
+{patched_code.strip()}
+```
+
+**Bug Explanation (E_bug):**
+{ebug_text.strip()}
+
+**Patch Explanation (E_patch):**
+{epatch_text.strip()}
+
+Evaluate both explanations on the following dimensions (1-5 scale, where 5 is best):
+
+1. **Accuracy**: Are the explanations technically correct? Do they accurately describe the vulnerability and fix?
+2. **Completeness**: Do they cover all key aspects (root cause, attack vector, mitigation)?
+3. **Clarity**: Are they clear, well-structured, and understandable?
+4. **Causality**: Do they provide good causal reasoning about why the bug exists and how the patch fixes it?
+
+Respond with ONLY a JSON object in this exact format:
+{{
+  "accuracy": <float 1-5>,
+  "completeness": <float 1-5>,
+  "clarity": <float 1-5>,
+  "causality": <float 1-5>,
+  "reasoning": "<brief explanation of scores>"
+}}"""

@@ -402,6 +402,8 @@ def run_single_evaluation(
     output_file: Path,
     *,
     llm_config: Dict[str, object],
+    enable_judge: bool = False,
+    judge_batch_size: int = 5,
     verbose: bool = True
 ) -> Dict:
     """단일 모델 × 조건에 대한 평가 실행"""
@@ -489,7 +491,12 @@ def run_single_evaluation(
     )
 
     # 평가 실행
-    evaluator = Evaluator(pipeline=pipeline, max_workers=evaluator_kwargs.get('max_workers'))
+    evaluator = Evaluator(
+        pipeline=pipeline,
+        max_workers=evaluator_kwargs.get('max_workers'),
+        enable_judge=enable_judge,
+        judge_batch_size=judge_batch_size,
+    )
     report = evaluator.run(cases)
 
     # 결과 저장
@@ -557,6 +564,8 @@ def run_experiment(
     start_index: int = 0,
     limit: int = None,
     generate_incomplete: bool = True,
+    enable_judge: bool = False,
+    judge_batch_size: int = 5,
     server_id: int = None,
     verbose: bool = True
 ):
@@ -582,6 +591,12 @@ def run_experiment(
             print(f"  Saved assigned cases to: {cases_file}")
 
     print_header("Running Experiments: All Models × All Conditions")
+
+    if enable_judge and verbose:
+        print(f"\n🤖 LLM Judge Evaluation: ENABLED")
+        print(f"   Judge Model: gpt-5 (OpenAI)")
+        print(f"   Batch Size: {judge_batch_size} concurrent requests")
+        print(f"   Metrics: Accuracy, Completeness, Clarity, Causality (1-5 scale)")
 
     # 모든 모델에 대해 실험
     results_summary = []
@@ -619,6 +634,8 @@ def run_experiment(
                     condition,
                     output_file,
                     llm_config=llm_config,
+                    enable_judge=enable_judge,
+                    judge_batch_size=judge_batch_size,
                     verbose=verbose
                 )
                 model_results['conditions'][condition] = {
@@ -951,6 +968,8 @@ def main():
             start_index=offset,
             limit=limit,
             generate_incomplete=not args.skip_incomplete_patches,
+            enable_judge=args.batch_judge,
+            judge_batch_size=args.batch_size,
             server_id=server_id,
             verbose=not args.quiet
         )
