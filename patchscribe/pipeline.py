@@ -189,6 +189,9 @@ class PatchScribePipeline:
                     "verification": verification.as_dict(),
                     "consistency": consistency.as_dict() if consistency else None,
                     "first_attempt": (iteration_idx == 0),
+                    "original_code": program,
+                    "patched_code": patch.patched_code,
+                    "vulnerability_signature": vuln_case.get("signature", ""),
                 }
             )
             
@@ -267,6 +270,16 @@ class PatchScribePipeline:
                 effect_for_explanations
             )
 
+        auto_instructions = self._build_case_prompt_directives(vuln_case)
+        combined_instructions_parts: List[str] = []
+        if self.explanation_extra_prompt:
+            extra = self.explanation_extra_prompt.strip()
+            if extra:
+                combined_instructions_parts.append(extra)
+        if auto_instructions:
+            combined_instructions_parts.append(auto_instructions)
+        combined_instructions = "\n\n".join(combined_instructions_parts) if combined_instructions_parts else None
+
         explanations = generate_explanations(
             pcg,
             scm,
@@ -276,7 +289,7 @@ class PatchScribePipeline:
             mode=self.explain_mode,
             strategy=self.strategy,
             signature=vuln_case.get("signature", ""),
-            extra_instructions=self.explanation_extra_prompt,
+            extra_instructions=combined_instructions,
         )
         explanation_metrics = self.explanation_evaluator.evaluate(
             explanations,
@@ -349,3 +362,33 @@ class PatchScribePipeline:
             "edges": [edge.__dict__ for edge in pcg.edges],
             "diagnostics": diagnostics,
         }
+
+    @staticmethod
+    def _build_case_prompt_directives(case: Dict[str, object]) -> str | None:
+        directives: List[str] = []
+
+        cwe = case.get("cwe_id")
+        if isinstance(cwe, str) and cwe and cwe.lower() != "unknown":
+            directives.append(f"Explicitly cite the vulnerability classification `{cwe}`.")
+
+        cve = case.get("cve_id")
+        if isinstance(cve, str) and cve:
+            directives.append(f"Mention the CVE identifier `{cve}` if relevant.")
+
+        vuln_line = case.get("vuln_line")
+        if isinstance(vuln_line, int) and vuln_line > 0:
+            directives.append(f"State that the vulnerable code is located at line {vuln_line}.")
+
+        signature = case.get("signature", "")
+        if isinstance(signature, str) and signature.strip():
+            normalized = " ".join(signature.strip().split())
+            if len(normalized) > 120:
+                normalized = normalized[:117].rstrip() + "..."
+            directives.append(f"Reference the vulnerable statement `{normalized}` when describing the root cause.")
+
+        if directives:
+            directives.append("Describe the causal chain that leads to the vulnerability in one clear sentence.")
+            directives.append("Close with a sentence explaining why the patched condition satisfies the formal requirements.")
+            return "Follow these additional requirements:\n" + "\n".join(f"- {item}" for item in directives)
+
+        return None

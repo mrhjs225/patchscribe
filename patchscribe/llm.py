@@ -245,12 +245,14 @@ class LLMClient:
         """Return full patched code text or None if unavailable."""
         if not self.available():
             return None
+        provider_hint = self._provider_hint()
         prompt = self._build_prompt(
             original_code,
             vulnerability_signature,
             interventions,
             strategy=strategy,
             natural_context=natural_context,
+            provider_hint=provider_hint,
         )
         content = self._post_chat(
             [
@@ -595,7 +597,7 @@ class LLMClient:
                     "parts": [{"text": "\n\n".join(system_prompts)}],
                 }
 
-            payload["model"] = self.config.model
+            # Note: Gemini API receives model in the endpoint URL, not in payload
         elif provider == "openai":
             payload = {
                 "model": self.config.model,
@@ -694,6 +696,22 @@ class LLMClient:
             'a short "verdict", and optional "reason".'
         )
 
+    def _provider_hint(self) -> Optional[str]:
+        provider = (self.config.provider or "").lower()
+        if provider == "gemini":
+            return (
+                "- 답변은 반드시 순수한 C 코드만 포함해야 하며 Markdown 코드블록을 사용하지 마세요.\n"
+                "- 함수 시그니처, 인덴트, 주석 스타일을 유지하면서 필요한 가드만 추가하세요.\n"
+                "- 취약 지문(시그니처)에 등장하는 변수/포인터 이름을 그대로 사용하는 방어 로직을 우선적으로 추가하세요.\n"
+                "- TODO, placeholder, '...' 등의 불완전한 텍스트를 포함하지 마세요."
+            )
+        if provider == "claude-haiku-4-5":
+            return (
+                "- 패치는 기존 흐름을 보존하면서 필요한 최소 변경만 수행하세요.\n"
+                "- NULL/범위 검사를 추가할 때는 기존 오류 처리 경로(리턴 코드, 로그)를 유지합니다."
+            )
+        return None
+
     @staticmethod
     def _build_prompt(
         original_code: str,
@@ -702,6 +720,7 @@ class LLMClient:
         *,
         strategy: str = "formal",
         natural_context: str | None = None,
+        provider_hint: str | None = None,
     ) -> str:
         spec_lines = [
             "- target_line: {target_line}\n  enforce: {enforce}\n  rationale: {rationale}".format(**item)
@@ -748,6 +767,15 @@ class LLMClient:
                 + extra
                 + "\n\nProduce a patched version of the function that eliminates the vulnerability while keeping behaviour otherwise identical. Return only the patched C code without commentary."
             )
+        guideline_block = (
+            "\n\nPatch guidelines:\n"
+            "- 함수 시그니처와 반환 경로를 유지하고, 필요한 경우 가드/검증 로직을 추가하세요.\n"
+            "- 취약 지문에 등장한 버퍼/포인터/사이즈 변수를 그대로 참조하여 경계·NULL 검사를 넣으세요.\n"
+            "- 기존 오류 처리(로그, 리턴코드)를 삭제하지 말고, 새 검사에서도 동일 규약을 따르세요."
+        )
+        body += guideline_block
+        if provider_hint:
+            body += "\n\nProvider-specific instructions:\n" + provider_hint
         return header + body
 
     @staticmethod

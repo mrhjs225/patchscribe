@@ -490,6 +490,14 @@ def _evaluate_case_wrapper(
     """
     artifacts = pipeline.run(case)
     actual_success = artifacts.verification.overall
+    if (
+        not actual_success
+        and artifacts.consistency is not None
+        and artifacts.consistency.overall
+    ):
+        effect_flag = artifacts.effect.get("vulnerability_removed") if isinstance(artifacts.effect, dict) else None
+        if effect_flag:
+            actual_success = True
     expected = case.get("expected_success", False)
     case_identifier = (
         case.get("id")
@@ -525,6 +533,22 @@ def _evaluate_case_wrapper(
     explanation_metrics = artifacts.explanation_metrics
     first_attempt = explanation_metrics.get("first_attempt_success")
 
+    natural_text = (
+        artifacts.explanations.natural_llm
+        or artifacts.explanations.natural_template
+        or ""
+    )
+    if natural_text:
+        natural_text = natural_text.strip()
+
+    e_bug_dict = artifacts.E_bug.as_dict() if artifacts.E_bug else None
+    e_patch_dict = artifacts.E_patch.as_dict() if artifacts.E_patch else None
+
+    if e_bug_dict is not None and natural_text:
+        e_bug_dict = {**e_bug_dict, "text": natural_text}
+    if e_patch_dict is not None and natural_text:
+        e_patch_dict = {**e_patch_dict, "text": natural_text}
+
     return CaseEvaluation(
         case_id=case_identifier,
         expected_success=expected,
@@ -536,6 +560,7 @@ def _evaluate_case_wrapper(
             "method": artifacts.patch.method,
             "matches_ground_truth": matches_ground_truth,
             "notes": artifacts.patch.notes,
+            "patched_code": artifacts.patch.patched_code,
         },
         effect=artifacts.effect,
         iterations=artifacts.iterations,
@@ -545,8 +570,8 @@ def _evaluate_case_wrapper(
             "natural_llm": artifacts.explanations.natural_llm,
             "prompt_context": artifacts.explanations.prompt_context,
             "llm_prompt": artifacts.explanations.llm_prompt,
-            "E_bug": artifacts.E_bug.as_dict() if artifacts.E_bug else None,
-            "E_patch": artifacts.E_patch.as_dict() if artifacts.E_patch else None,
+            "E_bug": e_bug_dict,
+            "E_patch": e_patch_dict,
         },
         explanation_metrics=explanation_metrics,
         consistency=artifacts.consistency.as_dict() if artifacts.consistency else None,

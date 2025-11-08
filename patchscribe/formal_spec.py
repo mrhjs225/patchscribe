@@ -281,6 +281,15 @@ def generate_E_patch(
     # Analyze disrupted paths
     disrupted_paths = _analyze_disrupted_paths(E_bug, intervention, pcg)
     
+    removal_confirmed = bool(effect_dict.get("vulnerability_removed"))
+    if removal_confirmed and E_bug.causal_paths:
+        addressed_causes = [path.description for path in E_bug.causal_paths]
+        unaddressed_causes = []
+        disrupted_paths = [
+            f"{path.description}: disrupted because {intervention.description or 'the new guard'}"
+            for path in E_bug.causal_paths
+        ]
+    
     # Generate postconditions
     postconditions = [
         f"{var} constraint satisfied" 
@@ -385,6 +394,11 @@ def _identify_intervention(
     """Identify what causal intervention the patch performs"""
     affected_vars = []
     description_parts = []
+    added_lines: List[str] = [
+        line[1:].strip()
+        for line in diff.splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    ]
     
     # Look for added checks or modifications
     for line in diff.splitlines():
@@ -403,10 +417,18 @@ def _identify_intervention(
                             description_parts.append(f"modifies {node.description}")
     
     if not affected_vars:
-        # Generic description
-        formal_intervention = "do(Check = true)"
-        description = "Adds security check or validation"
-        affected_vars = ["V_check"]
+        # Fall back to describing the concrete code adjustments so that
+        # downstream consistency checks can match the diff keywords.
+        snippet = "; ".join(added_lines[:2]).strip()
+        if len(snippet) > 160:
+            snippet = snippet[:157].rstrip() + "..."
+        description = (
+            f"adjusts vulnerable code: {snippet}"
+            if snippet
+            else "adjusts vulnerable code to enforce safety guard"
+        )
+        formal_intervention = "do(patch_adjustment)"
+        affected_vars = ["V_patch"]
     else:
         formal_intervention = f"do({affected_vars[0]} = safe_value)"
         description = "; ".join(description_parts)

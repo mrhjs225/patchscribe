@@ -166,6 +166,73 @@ def _parse_zeroday_directory(directory: Path) -> DatasetCase:
     )
 
 
+def _load_extractfix_cases(limit: Optional[int] = None) -> List[DatasetCase]:
+    base = _ROOT / "datasets" / "extractfix_dataset"
+    cases: List[DatasetCase] = []
+    if not base.exists():
+        return cases
+
+    vul_files = sorted(base.glob("*_vul.c"))
+    for idx, vul_path in enumerate(vul_files):
+        if limit is not None and idx >= limit:
+            break
+        try:
+            case = _parse_extractfix_case(vul_path)
+        except Exception:
+            continue
+        cases.append(case)
+    return cases
+
+
+def _parse_extractfix_case(vul_path: Path) -> DatasetCase:
+    name = vul_path.name
+    if not name.endswith("_vul.c"):
+        raise ValueError(f"Unexpected extractfix file: {name}")
+
+    base_name = name[: -len("_vul.c")]
+    parts = base_name.split("___")
+    if len(parts) < 2:
+        raise ValueError(f"Malformed extractfix filename: {name}")
+
+    cwe_id = parts[0]
+    line_token_segment = parts[-1]
+    line_range = parts[-2] if len(parts) >= 2 else ""
+    if len(parts) > 3:
+        path_hint = "/".join(parts[1:-2])
+    elif len(parts) > 1:
+        path_hint = parts[1]
+    else:
+        path_hint = ""
+
+    line_token = line_token_segment.split(".c", 1)[0]
+    vuln_line = _safe_int(line_token, default=1)
+
+    source = vul_path.read_text()
+    nonvul_path = vul_path.with_name(name.replace("_vul.c", "_nonvul.c"))
+    ground_truth = nonvul_path.read_text() if nonvul_path.exists() else None
+
+    signature = _extract_signature(source, vuln_line)
+    metadata = {
+        "dataset": "extractfix",
+        "path_hint": path_hint,
+        "line_range": line_range,
+        "filename": name,
+    }
+
+    return DatasetCase(
+        id=base_name,
+        cwe_id=cwe_id,
+        cve_id="",
+        vuln_line=vuln_line,
+        signature=signature,
+        expected_success=True,
+        source=source,
+        ground_truth=ground_truth,
+        metadata=metadata,
+        max_iterations=5,
+    )
+
+
 def _safe_int(value: str, default: int) -> int:
     try:
         return int(value)
@@ -190,6 +257,8 @@ def _extract_signature(source: str, line_no: int) -> str:
 def load_cases(dataset: str = "poc", limit: Optional[int] = None) -> List[Dict[str, object]]:
     if dataset == "zeroday":
         return [case.to_dict() for case in _load_zeroday_cases(limit)]
+    if dataset == "extractfix":
+        return [case.to_dict() for case in _load_extractfix_cases(limit)]
     # default to legacy poc cases (optionally limited)
     cases = _legacy_poc_cases()
     if limit is not None:

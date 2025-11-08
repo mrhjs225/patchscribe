@@ -402,8 +402,6 @@ def run_single_evaluation(
     output_file: Path,
     *,
     llm_config: Dict[str, object],
-    enable_judge: bool = False,
-    judge_batch_size: int = 5,
     verbose: bool = True
 ) -> Dict:
     """단일 모델 × 조건에 대한 평가 실행"""
@@ -494,8 +492,6 @@ def run_single_evaluation(
     evaluator = Evaluator(
         pipeline=pipeline,
         max_workers=evaluator_kwargs.get('max_workers'),
-        enable_judge=enable_judge,
-        judge_batch_size=judge_batch_size,
     )
     report = evaluator.run(cases)
 
@@ -564,12 +560,15 @@ def run_experiment(
     start_index: int = 0,
     limit: int = None,
     generate_incomplete: bool = True,
-    enable_judge: bool = False,
-    judge_batch_size: int = 5,
     server_id: int = None,
-    verbose: bool = True
+    verbose: bool = True,
+    parallel_conditions: bool = False
 ):
-    """통합 실험 실행"""
+    """통합 실험 실행
+
+    Args:
+        parallel_conditions: True면 모든 (모델, condition) 조합을 병렬 처리
+    """
 
     # 케이스 로드
     if verbose:
@@ -592,78 +591,17 @@ def run_experiment(
 
     print_header("Running Experiments: All Models × All Conditions")
 
-    if enable_judge and verbose:
-        print(f"\n🤖 LLM Judge Evaluation: ENABLED")
-        print(f"   Judge Model: gpt-5 (OpenAI)")
-        print(f"   Batch Size: {judge_batch_size} concurrent requests")
-        print(f"   Metrics: Accuracy, Completeness, Clarity, Causality (1-5 scale)")
-
-    # 모든 모델에 대해 실험
-    results_summary = []
-
-    for model_spec in models:
-        model_name = model_spec.split(':', 1)[1] if ':' in model_spec else model_spec
-
-        print(f"\n{'#' * 70}")
-        print(f"  MODEL: {model_name}")
-        print(f"{'#' * 70}")
-
-        # 모델별 결과 디렉토리
-        model_output_dir = output_dir / model_name
-        model_output_dir.mkdir(parents=True, exist_ok=True)
-
-        model_results = {
-            'model': model_name,
-            'conditions': {}
-        }
-
-        # 모든 조건 실행
-        for condition in conditions:
-            # 결과 파일명
-            if server_id is not None:
-                result_filename = f"{condition}_server{server_id}_results.json"
-            else:
-                result_filename = f"{condition}_results.json"
-
-            output_file = model_output_dir / result_filename
-
-            try:
-                result = run_single_evaluation(
-                    cases,
-                    model_spec,
-                    condition,
-                    output_file,
-                    llm_config=llm_config,
-                    enable_judge=enable_judge,
-                    judge_batch_size=judge_batch_size,
-                    verbose=verbose
-                )
-                model_results['conditions'][condition] = {
-                    'success_rate': result['metrics'].get('success_rate', 0),
-                    'output_file': str(output_file)
-                }
-
-                if verbose:
-                    print(f"    ✅ Condition {condition} completed")
-
-            except KeyboardInterrupt:
-                print("\n\n⚠️  Interrupted by user")
-                sys.exit(130)
-            except Exception as e:
-                if verbose:
-                    print(f"    ❌ Failed: {e}")
-                    import traceback
-                    traceback.print_exc()
-                model_results['conditions'][condition] = {
-                    'success_rate': 0,
-                    'error': str(e)
-                }
-                continue
-
-        results_summary.append(model_results)
-
-        if verbose:
-            print(f"\n✅ Model {model_name} completed")
+    # 병렬 처리 모드 선택
+    if parallel_conditions:
+        results_summary = _run_experiment_parallel(
+            cases, models, conditions, output_dir, llm_config,
+            server_id, verbose
+        )
+    else:
+        results_summary = _run_experiment_sequential(
+            cases, models, conditions, output_dir, llm_config,
+            server_id, verbose
+        )
 
     # 불완전 패치 생성 (RQ2)
     if generate_incomplete:
@@ -715,16 +653,195 @@ def run_experiment(
         print("1. 모든 서버에서 실험이 완료될 때까지 대기")
         print("2. 중앙 서버에서 결과 수집:")
         print("   scp -r user@server0:~/patchscribe/results/server0 results/")
-        print("   scp -r user@server1:~/patchscribe/results/server1 results/")
-        print("   ...")
-        print("3. 결과 분석:")
-        print("   python3 scripts/analyze.py --merge results/server*")
-    else:
-        print("\n로컬 실험 - 다음 단계:")
-        print("1. 결과 분석:")
-        print(f"   python3 scripts/analyze.py {output_dir}")
 
-    print()
+
+def _run_experiment_sequential(
+    cases: List[Dict],
+    models: List[str],
+    conditions: List[str],
+    output_dir: Path,
+    llm_config: Dict[str, object],
+    server_id: int,
+    verbose: bool
+) -> List[Dict]:
+    """순차 처리 모드 (기존 동작)"""
+    results_summary = []
+
+    for model_spec in models:
+        model_name = model_spec.split(':', 1)[1] if ':' in model_spec else model_spec
+
+        print(f"\n{'#' * 70}")
+        print(f"  MODEL: {model_name}")
+        print(f"{'#' * 70}")
+
+        # 모델별 결과 디렉토리
+        model_output_dir = output_dir / model_name
+        model_output_dir.mkdir(parents=True, exist_ok=True)
+
+        model_results = {
+            'model': model_name,
+            'conditions': {}
+        }
+
+        # 모든 조건 실행
+        for condition in conditions:
+            # 결과 파일명
+            if server_id is not None:
+                result_filename = f"{condition}_server{server_id}_results.json"
+            else:
+                result_filename = f"{condition}_results.json"
+
+            output_file = model_output_dir / result_filename
+
+            try:
+                result = run_single_evaluation(
+                    cases,
+                    model_spec,
+                    condition,
+                    output_file,
+                    llm_config=llm_config,
+                    verbose=verbose
+                )
+                model_results['conditions'][condition] = {
+                    'success_rate': result['metrics'].get('success_rate', 0),
+                    'output_file': str(output_file)
+                }
+
+                if verbose:
+                    print(f"    ✅ Condition {condition} completed")
+
+            except KeyboardInterrupt:
+                print("\n\n⚠️  Interrupted by user")
+                sys.exit(130)
+            except Exception as e:
+                if verbose:
+                    print(f"    ❌ Failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                model_results['conditions'][condition] = {
+                    'success_rate': 0,
+                    'error': str(e)
+                }
+                continue
+
+        results_summary.append(model_results)
+
+        if verbose:
+            print(f"\n✅ Model {model_name} completed")
+
+    return results_summary
+
+
+def _run_experiment_parallel(
+    cases: List[Dict],
+    models: List[str],
+    conditions: List[str],
+    output_dir: Path,
+    llm_config: Dict[str, object],
+    server_id: int,
+    verbose: bool
+) -> List[Dict]:
+    """병렬 처리 모드: 모든 (모델, condition) 조합을 동시에 처리"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+
+    # 모든 작업 조합 생성
+    tasks = []
+    for model_spec in models:
+        model_name = model_spec.split(':', 1)[1] if ':' in model_spec else model_spec
+        model_output_dir = output_dir / model_name
+        model_output_dir.mkdir(parents=True, exist_ok=True)
+
+        for condition in conditions:
+            if server_id is not None:
+                result_filename = f"{condition}_server{server_id}_results.json"
+            else:
+                result_filename = f"{condition}_results.json"
+
+            output_file = model_output_dir / result_filename
+            tasks.append((model_spec, model_name, condition, output_file))
+
+    if verbose:
+        print(f"\n🚀 Starting {len(tasks)} tasks in parallel...")
+        print(f"   Models: {len(models)}")
+        print(f"   Conditions: {len(conditions)}")
+        print(f"   Total combinations: {len(tasks)}")
+
+    # 출력용 Lock
+    print_lock = threading.Lock()
+
+    def run_task(task_info):
+        """단일 (모델, condition) 실행"""
+        model_spec, model_name, condition, output_file = task_info
+
+        try:
+            with print_lock:
+                print(f"  ▶ Starting: {model_name} - {condition}")
+
+            result = run_single_evaluation(
+                cases,
+                model_spec,
+                condition,
+                output_file,
+                llm_config=llm_config,
+                verbose=False  # 병렬 실행시 개별 verbose 끔
+            )
+
+            with print_lock:
+                success_rate = result['metrics'].get('success_rate', 0)
+                print(f"  ✅ Completed: {model_name} - {condition} ({success_rate:.1%})")
+
+            return (model_name, condition, {
+                'success_rate': success_rate,
+                'output_file': str(output_file)
+            }, None)
+
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            with print_lock:
+                print(f"  ❌ Failed: {model_name} - {condition}: {str(e)[:50]}")
+
+            return (model_name, condition, {
+                'success_rate': 0,
+                'error': str(e)
+            }, e)
+
+    # 병렬 실행
+    results_dict = {}
+
+    try:
+        with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+            futures = {executor.submit(run_task, task): task for task in tasks}
+
+            for future in as_completed(futures):
+                try:
+                    model_name, condition, result_info, error = future.result()
+
+                    if model_name not in results_dict:
+                        results_dict[model_name] = {'model': model_name, 'conditions': {}}
+
+                    results_dict[model_name]['conditions'][condition] = result_info
+
+                except KeyboardInterrupt:
+                    print("\n\n⚠️  Interrupted by user")
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    sys.exit(130)
+                except Exception as e:
+                    if verbose:
+                        print(f"  ❌ Unexpected error: {e}")
+                        import traceback
+                        traceback.print_exc()
+
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Interrupted by user")
+        sys.exit(130)
+
+    # 결과를 모델 순서대로 정렬
+    results_summary = [results_dict[model_spec.split(':', 1)[1] if ':' in model_spec else model_spec]
+                       for model_spec in models if (model_spec.split(':', 1)[1] if ':' in model_spec else model_spec) in results_dict]
+
+    return results_summary
 
 
 def main():
@@ -791,7 +908,7 @@ def main():
     parser.add_argument(
         '--dataset',
         default='zeroday',
-        choices=['zeroday', 'vulnfix'],
+        choices=['zeroday', 'extractfix', 'vulnfix'],
         help='데이터셋 (기본값: zeroday)'
     )
     parser.add_argument(
@@ -823,18 +940,6 @@ def main():
         action='store_true',
         help='불완전 패치 생성 건너뛰기'
     )
-    parser.add_argument(
-        '--batch-judge',
-        action='store_true',
-        help='배치 모드로 GPT Judge 평가 (병렬 처리, 속도 향상)'
-    )
-    parser.add_argument(
-        '--batch-size',
-        type=int,
-        default=5,
-        help='배치 모드의 동시 요청 수 (기본값: 5)'
-    )
-
     # LLM configuration
     parser.add_argument(
         '--llm-provider',
@@ -860,6 +965,11 @@ def main():
         '--llm-concurrency',
         type=int,
         help='LLM 동시 요청 수 (OpenAI, Claude, Gemini 지원 모델에만 적용)'
+    )
+    parser.add_argument(
+        '--parallel-conditions',
+        action='store_true',
+        help='모든 (모델, condition) 조합을 병렬로 처리 (기본값: 순차 처리)'
     )
 
     # Output
@@ -968,10 +1078,9 @@ def main():
             start_index=offset,
             limit=limit,
             generate_incomplete=not args.skip_incomplete_patches,
-            enable_judge=args.batch_judge,
-            judge_batch_size=args.batch_size,
             server_id=server_id,
-            verbose=not args.quiet
+            verbose=not args.quiet,
+            parallel_conditions=args.parallel_conditions
         )
 
         print("\n✅ Experiment completed successfully!\n")
