@@ -211,6 +211,7 @@ def batch_evaluate(
                     performance=case_dict.get('performance'),
                     patch_quality=case_dict.get('patch_quality'),
                     ast_similarity=case_dict.get('ast_similarity'),
+                    success_judgment=case_dict.get('success_judgment'),
                 ))
 
             # Recalculate metrics

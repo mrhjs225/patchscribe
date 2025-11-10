@@ -172,27 +172,34 @@ def _load_extractfix_cases(limit: Optional[int] = None) -> List[DatasetCase]:
     if not base.exists():
         return cases
 
+    directories = sorted(path for path in base.iterdir() if path.is_dir())
+    if directories:
+        for idx, directory in enumerate(directories):
+            if limit is not None and idx >= limit:
+                break
+            try:
+                case = _parse_extractfix_directory(directory)
+            except Exception:
+                continue
+            cases.append(case)
+        return cases
+
     vul_files = sorted(base.glob("*_vul.c"))
     for idx, vul_path in enumerate(vul_files):
         if limit is not None and idx >= limit:
             break
         try:
-            case = _parse_extractfix_case(vul_path)
+            case = _parse_extractfix_file(vul_path)
         except Exception:
             continue
         cases.append(case)
     return cases
 
 
-def _parse_extractfix_case(vul_path: Path) -> DatasetCase:
-    name = vul_path.name
-    if not name.endswith("_vul.c"):
-        raise ValueError(f"Unexpected extractfix file: {name}")
-
-    base_name = name[: -len("_vul.c")]
-    parts = base_name.split("___")
+def _extract_extractfix_metadata(entry_name: str) -> tuple[str, str, str, str, int, Optional[int], Optional[int]]:
+    parts = entry_name.split("___")
     if len(parts) < 2:
-        raise ValueError(f"Malformed extractfix filename: {name}")
+        raise ValueError(f"Malformed extractfix entry: {entry_name}")
 
     cwe_id = parts[0]
     line_token_segment = parts[-1]
@@ -204,23 +211,39 @@ def _parse_extractfix_case(vul_path: Path) -> DatasetCase:
     else:
         path_hint = ""
 
+    range_start = _parse_optional_int(line_range.split("-", 1)[0]) if "-" in line_range else _parse_optional_int(line_range)
+    range_end = _parse_optional_int(line_range.split("-", 1)[1]) if "-" in line_range else None
+
     line_token = line_token_segment.split(".c", 1)[0]
     vuln_line = _safe_int(line_token, default=1)
+    return entry_name, cwe_id, line_range, path_hint, vuln_line, range_start, range_end
 
-    source = vul_path.read_text()
-    nonvul_path = vul_path.with_name(name.replace("_vul.c", "_nonvul.c"))
-    ground_truth = nonvul_path.read_text() if nonvul_path.exists() else None
 
+def _parse_extractfix_directory(directory: Path) -> DatasetCase:
+    if not directory.is_dir():
+        raise ValueError(f"Unexpected extractfix entry: {directory}")
+
+    case_id, cwe_id, line_range, path_hint, vuln_line_abs, range_start, range_end = _extract_extractfix_metadata(directory.name)
+    source_path = directory / "vul.c"
+    if not source_path.exists():
+        raise ValueError(f"Missing vul.c in {directory}")
+    source = source_path.read_text()
+    vuln_line = _normalize_vuln_line(vuln_line_abs, range_start, source)
+    patched_path = directory / "nonvul.c"
+    ground_truth = patched_path.read_text() if patched_path.exists() else None
     signature = _extract_signature(source, vuln_line)
     metadata = {
         "dataset": "extractfix",
         "path_hint": path_hint,
         "line_range": line_range,
-        "filename": name,
+        "directory": directory.name,
+        "path": str(directory),
+        "original_vuln_line": vuln_line_abs,
+        "range_start": range_start,
+        "range_end": range_end,
     }
-
     return DatasetCase(
-        id=base_name,
+        id=case_id,
         cwe_id=cwe_id,
         cve_id="",
         vuln_line=vuln_line,
@@ -231,6 +254,69 @@ def _parse_extractfix_case(vul_path: Path) -> DatasetCase:
         metadata=metadata,
         max_iterations=5,
     )
+
+
+def _parse_extractfix_file(vul_path: Path) -> DatasetCase:
+    name = vul_path.name
+    if not name.endswith("_vul.c"):
+        raise ValueError(f"Unexpected extractfix file: {name}")
+
+    base_name = name[: -len("_vul.c")]
+    case_id, cwe_id, line_range, path_hint, vuln_line_abs, range_start, range_end = _extract_extractfix_metadata(base_name)
+
+    source = vul_path.read_text()
+    vuln_line = _normalize_vuln_line(vuln_line_abs, range_start, source)
+    nonvul_path = vul_path.with_name(name.replace("_vul.c", "_nonvul.c"))
+    ground_truth = nonvul_path.read_text() if nonvul_path.exists() else None
+
+    signature = _extract_signature(source, vuln_line)
+    metadata = {
+        "dataset": "extractfix",
+        "path_hint": path_hint,
+        "line_range": line_range,
+        "filename": name,
+        "original_vuln_line": vuln_line_abs,
+        "range_start": range_start,
+        "range_end": range_end,
+    }
+
+    return DatasetCase(
+        id=case_id,
+        cwe_id=cwe_id,
+        cve_id="",
+        vuln_line=vuln_line,
+        signature=signature,
+        expected_success=True,
+        source=source,
+        ground_truth=ground_truth,
+        metadata=metadata,
+        max_iterations=5,
+    )
+
+
+def _normalize_vuln_line(vuln_line_abs: int, range_start: Optional[int], source: str) -> int:
+    lines = source.splitlines()
+    total = len(lines)
+    if total == 0:
+        return 1
+    if range_start is not None:
+        relative = vuln_line_abs - range_start + 1
+    else:
+        relative = vuln_line_abs
+    if relative < 1:
+        relative = 1
+    if relative > total:
+        relative = total
+    return relative
+
+
+def _parse_optional_int(value: str | None) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
 
 
 def _safe_int(value: str, default: int) -> int:

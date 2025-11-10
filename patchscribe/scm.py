@@ -15,11 +15,26 @@ class SCMVariable:
     var_type: str  # "bool", "int", "pointer"
     domain: List[str] = field(default_factory=list)
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "SCMVariable":
+        return cls(
+            name=data.get("name", ""),
+            var_type=data.get("var_type", "unknown"),
+            domain=list(data.get("domain", [])),
+        )
+
 
 @dataclass
 class StructuralEquation:
     target: str
     expression: str
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "StructuralEquation":
+        return cls(
+            target=data.get("target", ""),
+            expression=data.get("expression", ""),
+        )
 
 
 @dataclass
@@ -34,6 +49,20 @@ class StructuralCausalModel:
             "equations": [eq.__dict__ for eq in self.equations],
             "vulnerable_condition": self.vulnerable_condition,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "StructuralCausalModel":
+        model = cls()
+        for name, var in (data.get("variables") or {}).items():
+            if isinstance(var, dict):
+                model.variables[name] = SCMVariable.from_dict(
+                    {"name": var.get("name", name), **var}
+                )
+        for eq in data.get("equations", []):
+            if isinstance(eq, dict):
+                model.equations.append(StructuralEquation.from_dict(eq))
+        model.vulnerable_condition = data.get("vulnerable_condition", "")
+        return model
 
 
 class SCMBuilder:

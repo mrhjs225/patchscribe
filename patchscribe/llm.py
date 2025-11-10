@@ -143,6 +143,16 @@ class LLMConfig:
         )
 
 
+@dataclass(frozen=True)
+class PromptOptions:
+    """Controls which informational blocks are injected into patch prompts."""
+
+    include_interventions: bool = True
+    include_natural_context: bool = True
+    include_guidelines: bool = True
+    include_provider_hint: bool = True
+
+
 class LLMClient:
     """Thin HTTP client for chat-style completion APIs used in the PoC."""
 
@@ -241,6 +251,7 @@ class LLMClient:
         *,
         strategy: str = "formal",
         natural_context: str | None = None,
+        prompt_options: PromptOptions | None = None,
     ) -> Optional[str]:
         """Return full patched code text or None if unavailable."""
         if not self.available():
@@ -253,6 +264,7 @@ class LLMClient:
             strategy=strategy,
             natural_context=natural_context,
             provider_hint=provider_hint,
+            prompt_options=prompt_options,
         )
         content = self._post_chat(
             [
@@ -721,7 +733,9 @@ class LLMClient:
         strategy: str = "formal",
         natural_context: str | None = None,
         provider_hint: str | None = None,
+        prompt_options: PromptOptions | None = None,
     ) -> str:
+        options = prompt_options or PromptOptions()
         spec_lines = [
             "- target_line: {target_line}\n  enforce: {enforce}\n  rationale: {rationale}".format(**item)
             for item in interventions
@@ -741,40 +755,61 @@ class LLMClient:
                 "Return only the patched C code without commentary."
             )
         elif strategy == "natural":
-            natural_block = natural_context or "No causal explanation provided. Focus on preventing the described failure."
-            body = (
-                "You are given a causal explanation of the bug. Use it to produce a minimal patch.\n\n"
-                "Causal explanation:\n"
-                f"{natural_block}\n\n"
-                "Return only the patched C code without commentary."
-            )
+            natural_block = natural_context if (options.include_natural_context and natural_context) else None
+            if natural_block:
+                body = (
+                    "You are given a causal explanation of the bug. Use it to produce a minimal patch.\n\n"
+                    "Causal explanation:\n"
+                    f"{natural_block}\n\n"
+                    "Return only the patched C code without commentary."
+                )
+            else:
+                body = (
+                    "Produce a minimal patch that removes the vulnerability indicated by the signature "
+                    "while preserving functionality. Return only the patched C code without commentary."
+                )
         elif strategy == "only_natural":
-            natural_block = natural_context or "A natural-language summary is unavailable; reason about the likely misuse from the signature."
-            body = (
-                "You are given a natural-language description of the issue and desired behaviour. "
-                "Rely on that description to adjust the function and remove the vulnerability while keeping other behaviour unchanged.\n\n"
-                "Natural description:\n"
-                f"{natural_block}\n\n"
-                "Return only the patched C code without commentary."
-            )
+            natural_block = natural_context if (options.include_natural_context and natural_context) else None
+            if natural_block:
+                body = (
+                    "You are given a natural-language description of the issue and desired behaviour. "
+                    "Rely on that description to adjust the function and remove the vulnerability while keeping other behaviour unchanged.\n\n"
+                    "Natural description:\n"
+                    f"{natural_block}\n\n"
+                    "Return only the patched C code without commentary."
+                )
+            else:
+                body = (
+                    "Use the vulnerable signature and surrounding code to infer the required fix. "
+                    "Return only the patched C code without commentary."
+                )
         else:  # formal
             extra = ""
-            if natural_context:
+            if options.include_natural_context and natural_context:
                 extra = "\n\nNatural causal summary:\n" + natural_context
-            body = (
-                "Intervention specification (YAML):\n"
-                + spec_block
-                + extra
-                + "\n\nProduce a patched version of the function that eliminates the vulnerability while keeping behaviour otherwise identical. Return only the patched C code without commentary."
+            intervention_section = ""
+            if options.include_interventions and spec_lines:
+                intervention_section = "Intervention specification (YAML):\n" + spec_block
+            elif options.include_interventions and not spec_lines:
+                intervention_section = ""
+            body_parts = []
+            if intervention_section:
+                body_parts.append(intervention_section)
+            if extra:
+                body_parts.append(extra.strip())
+            body_parts.append(
+                "Produce a patched version of the function that eliminates the vulnerability while keeping behaviour otherwise identical. Return only the patched C code without commentary."
             )
+            body = "\n\n".join(part for part in body_parts if part)
         guideline_block = (
             "\n\nPatch guidelines:\n"
             "- 함수 시그니처와 반환 경로를 유지하고, 필요한 경우 가드/검증 로직을 추가하세요.\n"
             "- 취약 지문에 등장한 버퍼/포인터/사이즈 변수를 그대로 참조하여 경계·NULL 검사를 넣으세요.\n"
             "- 기존 오류 처리(로그, 리턴코드)를 삭제하지 말고, 새 검사에서도 동일 규약을 따르세요."
         )
-        body += guideline_block
-        if provider_hint:
+        if options.include_guidelines:
+            body += guideline_block
+        if provider_hint and options.include_provider_hint:
             body += "\n\nProvider-specific instructions:\n" + provider_hint
         return header + body
 

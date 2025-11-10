@@ -11,7 +11,7 @@ from typing import Dict, Optional
 from .llm import LLMClient, LLMUnavailable
 from .formal_spec import FormalBugExplanation, FormalPatchExplanation
 from .patch import PatchResult
-from .verification import VerificationResult
+from .consistency_checker import ConsistencyResult
 
 TEXTUAL_SCORE_HINTS: Dict[str, float] = {
     # Common qualitative descriptors some LLMs return instead of numeric scores.
@@ -56,12 +56,12 @@ class PatchQualityEvaluator:
         patch: PatchResult,
         E_bug: FormalBugExplanation | None,
         E_patch: FormalPatchExplanation | None,
-        verification: VerificationResult | None,
+        consistency: ConsistencyResult | None,
     ) -> PatchQualityEvaluation:
         if not self.llm.available():
             return PatchQualityEvaluation(scores={}, verdict="LLM unavailable")
 
-        prompt = self._build_prompt(patch, E_bug, E_patch, verification)
+        prompt = self._build_prompt(patch, E_bug, E_patch, consistency)
         try:
             response = self.llm.score_patch(prompt)
         except LLMUnavailable:
@@ -158,11 +158,11 @@ class PatchQualityEvaluator:
         patch: PatchResult,
         E_bug: FormalBugExplanation | None,
         E_patch: FormalPatchExplanation | None,
-        verification: VerificationResult | None,
+        consistency: ConsistencyResult | None,
     ) -> str:
         eb_summary = E_bug.as_dict() if E_bug else {}
         ep_summary = E_patch.as_dict() if E_patch else {}
-        verification_dict = verification.as_dict() if verification else {}
+        consistency_dict = consistency.as_dict() if consistency else {}
 
         return json.dumps(
             {
@@ -178,7 +178,7 @@ class PatchQualityEvaluator:
                 },
                 "E_bug": eb_summary,
                 "E_patch": ep_summary,
-                "verification": verification_dict,
+                "consistency": consistency_dict,
             },
             ensure_ascii=False,
         )

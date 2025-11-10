@@ -26,6 +26,16 @@ class VariableSpec:
         """Convert to dictionary for JSON serialization"""
         return asdict(self)
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "VariableSpec":
+        return cls(
+            name=data.get("name", ""),
+            var_type=data.get("var_type", "unknown"),
+            meaning=data.get("meaning", ""),
+            code_location=data.get("code_location", "Unknown"),
+            domain=list(data.get("domain", [])),
+        )
+
 
 @dataclass
 class CausalPath:
@@ -37,6 +47,14 @@ class CausalPath:
     def as_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "CausalPath":
+        return cls(
+            path_id=data.get("path_id", ""),
+            nodes=list(data.get("nodes", [])),
+            description=data.get("description", ""),
+        )
     
 
 @dataclass
@@ -50,33 +68,49 @@ class Assertion:
         """Convert to dictionary for JSON serialization"""
         return asdict(self)
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "Assertion":
+        return cls(
+            expression=data.get("expression", ""),
+            location=data.get("location", ""),
+            description=data.get("description", ""),
+        )
+
 
 @dataclass
 class FormalBugExplanation:
     """
     Complete formal specification of a vulnerability (E_bug).
     This is the output of Phase 1: Vulnerability Formalization.
+
+    Enhanced with prescriptive fix requirements to guide patch generation.
     """
     # Formal specification
     formal_condition: str  # "V_bug ⟺ φ(X₁, ..., Xₙ)"
     variables: Dict[str, VariableSpec]
-    
+
     # Natural language description
     description: str
     manifestation: str
-    
+
     # Code mapping
     vulnerable_location: str
     causal_paths: List[CausalPath]
-    
-    # Fix requirements
+
+    # Fix requirements (original)
     safety_property: str  # "∀inputs: ¬V_bug(inputs)"
     intervention_options: List[str]
-    
+
+    # Enhanced fix requirements (NEW)
+    required_fixes: List[str] = field(default_factory=list)  # What MUST be done to fix
+    fix_constraints: List[str] = field(default_factory=list)  # Constraints the fix must satisfy
+    invalid_fixes: List[str] = field(default_factory=list)  # Known insufficient solutions
+    must_preserve: List[str] = field(default_factory=list)  # Functionality that must not break
+
     # Verification artifacts
-    preconditions: List[str]
-    postconditions: List[str]
-    assertions: List[Assertion]
+    preconditions: List[str] = field(default_factory=list)
+    postconditions: List[str] = field(default_factory=list)
+    assertions: List[Assertion] = field(default_factory=list)
     
     def as_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
@@ -89,10 +123,49 @@ class FormalBugExplanation:
             'causal_paths': [p.as_dict() for p in self.causal_paths],
             'safety_property': self.safety_property,
             'intervention_options': self.intervention_options,
+            'required_fixes': self.required_fixes,
+            'fix_constraints': self.fix_constraints,
+            'invalid_fixes': self.invalid_fixes,
+            'must_preserve': self.must_preserve,
             'preconditions': self.preconditions,
             'postconditions': self.postconditions,
             'assertions': [a.as_dict() for a in self.assertions]
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "FormalBugExplanation":
+        variables = {
+            name: VariableSpec.from_dict(var)
+            for name, var in (data.get("variables") or {}).items()
+            if isinstance(var, dict)
+        }
+        causal_paths = [
+            CausalPath.from_dict(item)
+            for item in data.get("causal_paths", [])
+            if isinstance(item, dict)
+        ]
+        assertions = [
+            Assertion.from_dict(item)
+            for item in data.get("assertions", [])
+            if isinstance(item, dict)
+        ]
+        return cls(
+            formal_condition=data.get("formal_condition", ""),
+            variables=variables,
+            description=data.get("description", ""),
+            manifestation=data.get("manifestation", ""),
+            vulnerable_location=data.get("vulnerable_location", ""),
+            causal_paths=causal_paths,
+            safety_property=data.get("safety_property", ""),
+            intervention_options=list(data.get("intervention_options", [])),
+            required_fixes=list(data.get("required_fixes", [])),
+            fix_constraints=list(data.get("fix_constraints", [])),
+            invalid_fixes=list(data.get("invalid_fixes", [])),
+            must_preserve=list(data.get("must_preserve", [])),
+            preconditions=list(data.get("preconditions", [])),
+            postconditions=list(data.get("postconditions", [])),
+            assertions=assertions,
+        )
 
 
 @dataclass
@@ -226,7 +299,12 @@ def generate_E_bug(
         f"Vulnerability occurs when {scm.vulnerable_condition or 'condition not determined'}. "
         f"Located at {vuln_location}."
     )
-    
+
+    # Generate prescriptive fix requirements based on vulnerability analysis
+    required_fixes, fix_constraints, invalid_fixes, must_preserve = _generate_fix_requirements(
+        pcg, scm, intervention_spec, vuln_info
+    )
+
     return FormalBugExplanation(
         formal_condition=f"V_bug ⟺ {scm.vulnerable_condition or 'True'}",
         variables=variables,
@@ -236,6 +314,10 @@ def generate_E_bug(
         causal_paths=causal_paths,
         safety_property=f"∀inputs: ¬({scm.vulnerable_condition or 'V_bug'})",
         intervention_options=intervention_options,
+        required_fixes=required_fixes,
+        fix_constraints=fix_constraints,
+        invalid_fixes=invalid_fixes,
+        must_preserve=must_preserve,
         preconditions=[
             "Input can be attacker-controlled",
             "Execution reaches vulnerable location"
@@ -492,7 +574,7 @@ def _analyze_disrupted_paths(
 ) -> List[str]:
     """Analyze which causal paths are disrupted by the intervention"""
     disrupted = []
-    
+
     for path in E_bug.causal_paths:
         # Check if intervention affects any node in the path
         for var in intervention.affected_variables:
@@ -503,5 +585,378 @@ def _analyze_disrupted_paths(
                     f"Path broken by {intervention.description}"
                 )
                 break
-    
+
     return disrupted
+
+
+# Helper functions for causal analysis-based fix requirement generation
+
+def _find_vulnerability_node(pcg: ProgramCausalGraph) -> Optional[str]:
+    """Find the vulnerability node in PCG"""
+    for node_id, node in pcg.nodes.items():
+        if node.node_type == "vulnerability":
+            return node_id
+    return None
+
+
+def _extract_all_causal_paths_to_vuln(
+    pcg: ProgramCausalGraph,
+    vuln_node_id: str
+) -> List[List[str]]:
+    """
+    Extract all causal paths from inputs to vulnerability.
+
+    Algorithm: BFS from vulnerability node backwards to find all paths to root causes.
+    """
+    paths = []
+
+    def dfs_paths(current: str, path: List[str], visited: set) -> None:
+        if current in visited:
+            return
+
+        visited.add(current)
+        path.append(current)
+
+        predecessors = pcg.predecessors(current)
+        if not predecessors:
+            # Reached a root cause (no predecessors)
+            paths.append(list(reversed(path)))
+        else:
+            for pred in predecessors:
+                dfs_paths(pred, path.copy(), visited.copy())
+
+    dfs_paths(vuln_node_id, [], set())
+    return paths
+
+
+def _derive_required_interventions_from_paths(
+    causal_paths: List[List[str]],
+    pcg: ProgramCausalGraph,
+    scm: StructuralCausalModel
+) -> List[Dict[str, object]]:
+    """
+    Derive required interventions using minimum vertex cover approach.
+
+    Goal: Find minimum set of nodes whose intervention disrupts all paths.
+
+    Algorithm:
+    1. Build a set of all nodes in all paths (excluding vuln node)
+    2. Use greedy approximation for weighted vertex cover
+    3. Select nodes that cover maximum paths with minimum cost
+    """
+    if not causal_paths:
+        return []
+
+    # Count how many paths each node appears in
+    node_path_count: Dict[str, int] = {}
+    for path in causal_paths:
+        for node_id in path[:-1]:  # Exclude vulnerability node
+            node_path_count[node_id] = node_path_count.get(node_id, 0) + 1
+
+    # Greedy selection: pick nodes that cover most paths
+    interventions = []
+    covered_paths = set()
+
+    # Sort by coverage (descending)
+    sorted_nodes = sorted(
+        node_path_count.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    for node_id, count in sorted_nodes:
+        # Find which paths this node covers
+        node_paths = {
+            i for i, path in enumerate(causal_paths)
+            if node_id in path[:-1]
+        }
+
+        # If this node covers new paths, include it
+        new_coverage = node_paths - covered_paths
+        if new_coverage:
+            node = pcg.nodes.get(node_id)
+            if node:
+                interventions.append({
+                    'node_id': node_id,
+                    'node': node,
+                    'covered_paths': list(new_coverage),
+                    'coverage_count': len(new_coverage)
+                })
+                covered_paths.update(new_coverage)
+
+        # Early termination if all paths covered
+        if len(covered_paths) >= len(causal_paths):
+            break
+
+    return interventions
+
+
+def _translate_intervention_to_requirement(
+    intervention: Dict[str, object],
+    pcg: ProgramCausalGraph
+) -> str:
+    """
+    Translate a causal intervention to a code-level requirement.
+
+    Uses node description and type to infer the appropriate code action.
+    """
+    node = intervention['node']
+    node_id = intervention['node_id']
+
+    description = node.description if node.description else f"node {node_id}"
+
+    # Infer action based on description keywords
+    desc_lower = description.lower()
+
+    if any(word in desc_lower for word in ['null', 'nullptr', 'uninitialized']):
+        return f"Add NULL/validity check for: {description}"
+    elif any(word in desc_lower for word in ['bound', 'size', 'length', 'overflow']):
+        return f"Add bounds validation for: {description}"
+    elif any(word in desc_lower for word in ['format', 'printf', 'sprintf']):
+        return f"Sanitize or use safe format string API for: {description}"
+    elif any(word in desc_lower for word in ['integer', 'overflow', 'wraparound']):
+        return f"Add overflow check for: {description}"
+    elif any(word in desc_lower for word in ['input', 'user', 'external']):
+        return f"Validate and sanitize input: {description}"
+    else:
+        # Generic intervention
+        return f"Prevent unsafe state by intervening on: {description}"
+
+
+def _derive_intervention_constraints(
+    intervention: Dict[str, object],
+    causal_paths: List[List[str]],
+    pcg: ProgramCausalGraph
+) -> List[str]:
+    """
+    Derive constraints for an intervention based on causal paths it must disrupt.
+    """
+    constraints = []
+    node_id = intervention['node_id']
+    covered_path_indices = intervention['covered_paths']
+    node = intervention['node']  # PCGNode object
+
+    # Constraint 1: Must cover all specified paths
+    if len(covered_path_indices) > 0:
+        constraints.append(
+            f"This intervention must disrupt {len(covered_path_indices)} causal path(s)"
+        )
+
+    # Constraint 2: Must occur before vulnerability
+    node_desc = node.description if hasattr(node, 'description') else str(node_id)
+    constraints.append(
+        f"Intervention on {node_desc} must occur "
+        "BEFORE the vulnerable operation"
+    )
+
+    # Constraint 3: Must cover ALL occurrences if node appears multiple times
+    occurrences = sum(1 for path in causal_paths if node_id in path)
+    if occurrences > 1:
+        constraints.append(
+            f"Must handle ALL {occurrences} occurrences of this condition in causal paths"
+        )
+
+    return constraints
+
+
+def _identify_partial_interventions(
+    causal_paths: List[List[str]],
+    required_interventions: List[Dict[str, object]],
+    pcg: ProgramCausalGraph
+) -> List[Dict[str, object]]:
+    """
+    Identify interventions that would be insufficient (don't cover all paths).
+
+    This helps generate the 'invalid_fixes' list by identifying partial solutions.
+    """
+    partial = []
+
+    # Get nodes that were NOT selected
+    selected_nodes = {interv['node_id'] for interv in required_interventions}
+
+    # Find nodes that appear in paths but weren't selected
+    all_nodes_in_paths = set()
+    for path in causal_paths:
+        all_nodes_in_paths.update(path[:-1])  # Exclude vuln node
+
+    unselected_nodes = all_nodes_in_paths - selected_nodes
+
+    for node_id in unselected_nodes:
+        # Find which paths this node would cover
+        covered = [i for i, path in enumerate(causal_paths) if node_id in path[:-1]]
+        uncovered = [i for i in range(len(causal_paths)) if i not in covered]
+
+        if uncovered:  # This intervention would leave some paths uncovered
+            node = pcg.nodes.get(node_id)
+            if node:
+                partial.append({
+                    'node_id': node_id,
+                    'node': node,
+                    'covered_paths': covered,
+                    'uncovered_paths': uncovered
+                })
+
+    return partial
+
+
+def _describe_why_insufficient(
+    partial_intervention: Dict[str, object],
+    causal_paths: List[List[str]],
+    pcg: ProgramCausalGraph
+) -> str:
+    """
+    Generate a description of why a partial intervention is insufficient.
+    """
+    node = partial_intervention['node']
+    uncovered = partial_intervention['uncovered_paths']
+
+    if len(uncovered) == len(causal_paths):
+        return f"Intervening only on '{node.description}' covers no causal paths"
+    else:
+        return (
+            f"Intervening only on '{node.description}' is insufficient: "
+            f"leaves {len(uncovered)} of {len(causal_paths)} causal path(s) uncovered"
+        )
+
+
+def _derive_preservation_constraints(
+    scm: StructuralCausalModel,
+    required_interventions: List[Dict[str, object]]
+) -> List[str]:
+    """
+    Derive what must be preserved based on SCM equations not involved in interventions.
+    """
+    preservation = []
+
+    # Get variables involved in interventions
+    intervened_vars = {f"V_{interv['node_id']}" for interv in required_interventions}
+
+    # Find variables in SCM not affected by interventions
+    for var_name, var_spec in scm.variables.items():
+        if var_name not in intervened_vars:
+            # This variable should remain unchanged
+            if hasattr(var_spec, 'meaning') and var_spec.meaning:
+                preservation.append(f"Preserve behavior of: {var_spec.meaning}")
+
+    # Add general preservation requirements
+    preservation.extend([
+        "Preserve normal program functionality when inputs are valid",
+        "Maintain existing error handling and return value semantics"
+    ])
+
+    return preservation
+
+
+def _fallback_to_intervention_spec(
+    intervention_spec: InterventionSpec,
+    scm: StructuralCausalModel
+) -> tuple[List[str], List[str], List[str], List[str]]:
+    """
+    Fallback when PCG analysis is unavailable: use intervention spec directly.
+    """
+    required_fixes = []
+    fix_constraints = []
+    invalid_fixes = []
+    must_preserve = []
+
+    # Extract from intervention spec
+    for interv in intervention_spec.interventions:
+        if interv.enforce:
+            required_fixes.append(f"Enforce: {interv.enforce}")
+        if interv.rationale:
+            fix_constraints.append(f"Rationale: {interv.rationale}")
+
+    # Add constraint from SCM
+    if scm.vulnerable_condition and scm.vulnerable_condition != "True":
+        required_fixes.append(
+            f"Ensure the following condition becomes unsatisfiable: {scm.vulnerable_condition}"
+        )
+
+    # Generic constraints
+    fix_constraints.extend([
+        "Intervention must prevent the vulnerability condition from being satisfied",
+        "Fix must not introduce new vulnerabilities or side effects"
+    ])
+
+    must_preserve.append("Normal program functionality when inputs are valid")
+
+    return required_fixes, fix_constraints, invalid_fixes, must_preserve
+
+
+def _generate_fix_requirements(
+    pcg: ProgramCausalGraph,
+    scm: StructuralCausalModel,
+    intervention_spec: InterventionSpec,
+    vuln_info: Dict[str, object]
+) -> tuple[List[str], List[str], List[str], List[str]]:
+    """
+    Generate prescriptive fix requirements using causal analysis.
+
+    Systematic approach:
+    1. Extract causal paths from PCG leading to vulnerability
+    2. For each path, derive intervention points
+    3. Translate interventions to code-level requirements
+    4. Identify insufficient interventions (invalid fixes)
+    5. Determine preservation constraints from unaffected paths
+
+    This replaces hardcoded CWE-specific rules with general causal reasoning.
+
+    Returns:
+        (required_fixes, fix_constraints, invalid_fixes, must_preserve)
+    """
+    required_fixes = []
+    fix_constraints = []
+    invalid_fixes = []
+    must_preserve = []
+
+    # Step 1: Identify vulnerability node in PCG
+    vuln_node = _find_vulnerability_node(pcg)
+    if not vuln_node:
+        # Fallback: use intervention spec
+        return _fallback_to_intervention_spec(intervention_spec, scm)
+
+    # Step 2: Extract all causal paths to vulnerability
+    causal_paths = _extract_all_causal_paths_to_vuln(pcg, vuln_node)
+
+    # Step 3: Derive required interventions from causal analysis
+    required_interventions = _derive_required_interventions_from_paths(
+        causal_paths, pcg, scm
+    )
+
+    # Step 4: Translate interventions to code-level requirements
+    for intervention in required_interventions:
+        req_fix = _translate_intervention_to_requirement(intervention, pcg)
+        required_fixes.append(req_fix)
+
+        # Add constraints for this intervention
+        constraints = _derive_intervention_constraints(intervention, causal_paths, pcg)
+        fix_constraints.extend(constraints)
+
+    # Step 5: Identify insufficient interventions (partial path coverage)
+    partial_interventions = _identify_partial_interventions(
+        causal_paths, required_interventions, pcg
+    )
+    for partial in partial_interventions:
+        invalid_fix = _describe_why_insufficient(partial, causal_paths, pcg)
+        invalid_fixes.append(invalid_fix)
+
+    # Step 6: Derive preservation constraints from SCM
+    preservation = _derive_preservation_constraints(scm, required_interventions)
+    must_preserve.extend(preservation)
+
+    # Step 7: Add high-level constraint from vulnerable condition
+    if scm.vulnerable_condition and scm.vulnerable_condition != "True":
+        required_fixes.append(
+            f"Ensure the following condition becomes unsatisfiable: {scm.vulnerable_condition}"
+        )
+        fix_constraints.append(
+            "All causal paths leading to this condition must be disrupted"
+        )
+
+    # Add general constraints
+    fix_constraints.extend([
+        "Intervention must occur BEFORE the vulnerable operation",
+        "Fix must not introduce new vulnerabilities or side effects"
+    ])
+
+    return required_fixes, fix_constraints, invalid_fixes, must_preserve

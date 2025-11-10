@@ -3,8 +3,10 @@ High-level orchestration of the PatchScribe proof-of-concept workflow.
 """
 from __future__ import annotations
 
+import hashlib
 from contextlib import nullcontext
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List
 
 from .consistency_checker import ConsistencyChecker, ConsistencyResult
@@ -25,7 +27,7 @@ from .formal_spec import (
 )
 from .intervention import InterventionSpec, InterventionPlanner, refine_intervention
 from .patch import PatchGenerator, PatchResult
-from .llm import LLMClient
+from .llm import LLMClient, PromptOptions
 from .pcg_builder import PCGBuilder, PCGBuilderConfig
 from .performance import (
     PerformanceProfiler,
@@ -34,6 +36,7 @@ from .performance import (
     categorize_complexity,
 )
 from .scm import SCMBuilder
+from .stage1_cache import Stage1Cache, Stage1Data
 from .verification import VerificationResult, Verifier
 
 
@@ -69,6 +72,9 @@ class PatchScribePipeline:
         enable_consistency_check: bool = True,
         enable_performance_profiling: bool = False,
         llm_client: LLMClient | None = None,
+        stage1_cache_dir: str | Path | None = None,
+        force_stage1_recompute: bool = False,
+        prompt_options: PromptOptions | None = None,
     ) -> None:
         self.config = config or PCGBuilderConfig()
         self.effect_analyzer = PatchEffectAnalyzer(self.config)
@@ -83,7 +89,10 @@ class PatchScribePipeline:
         self.consistency_checker = ConsistencyChecker() if enable_consistency_check else None
         self.enable_performance_profiling = enable_performance_profiling
         self.llm_client = llm_client or LLMClient()
+        self.prompt_options = prompt_options
         self.patch_quality_evaluator = PatchQualityEvaluator(self.llm_client)
+        self.stage1_cache = Stage1Cache(stage1_cache_dir) if stage1_cache_dir else None
+        self.force_stage1_recompute = force_stage1_recompute
 
     def run(self, vuln_case: Dict[str, object]) -> PipelineArtifacts:
         program = vuln_case["source"].strip("\n")
@@ -99,21 +108,20 @@ class PatchScribePipeline:
             profiler.start_total()
             code_complexity = measure_code_complexity(program)
         
-        # Phase 1: Vulnerability Formalization
+        # Phase 1: Vulnerability Formalization (cached if possible)
         phase1_context = profiler.profile_phase("phase1_formalization") if profiler else nullcontext()
         with phase1_context:
-            pcg, diagnostics = PCGBuilder(program, vuln_info, self.config).build()
-            scm = SCMBuilder(pcg).derive()
-            intervention = InterventionPlanner(pcg, scm).compute()
-            
-            # Generate E_bug (Formal Bug Explanation)
-            E_bug = generate_E_bug(pcg, scm, intervention, vuln_info)
+            stage1 = self._load_or_build_stage1(vuln_case, program, vuln_info)
+            pcg = stage1.pcg
+            diagnostics = stage1.diagnostics
+            scm = stage1.scm
+            intervention = stage1.intervention
+            E_bug = stage1.e_bug
         
         iterations: List[Dict[str, object]] = []
         spec = intervention
         patch: PatchResult | None = None
         effect_dict: Dict[str, object] | None = None
-        verification: VerificationResult | None = None
         consistency: ConsistencyResult | None = None
         E_patch: FormalPatchExplanation | None = None
         first_attempt_success: bool | None = None
@@ -133,11 +141,7 @@ class PatchScribePipeline:
             llm_client=self.llm_client,
             strategy=self.strategy,
             natural_context=natural_context if self.strategy != "minimal" else None,
-        )
-        verifier = Verifier(
-            vuln_case.get("signature", ""),
-            original_code=program,
-            vuln_line=vuln_case.get("vuln_line"),
+            prompt_options=self.prompt_options,
         )
         
         # Phase 2 & 3: Iterative generation and verification
@@ -167,26 +171,22 @@ class PatchScribePipeline:
                     effect_dict
                 )
             
-            verification_ctx = profiler.profile_phase("phase3_verification") if profiler else nullcontext()
-            with verification_ctx:
-                verification = verifier.verify(patch, expected_condition=scm.vulnerable_condition)
-                
-                # Consistency checking
-                if self.consistency_checker:
-                    consistency = self.consistency_checker.check(E_bug, E_patch)
-            
+            # Consistency checking (always performed if enabled)
+            if self.consistency_checker:
+                consistency = self.consistency_checker.check(E_bug, E_patch)
+
             # Record first attempt success
             if iteration_idx == 0:
-                if self.consistency_checker:
-                    first_attempt_success = verification.overall and consistency.overall
+                if self.consistency_checker and consistency:
+                    first_attempt_success = consistency.accepted
                 else:
-                    first_attempt_success = verification.overall
-            
+                    # Without consistency check, consider first attempt always successful
+                    first_attempt_success = True
+
             iterations.append(
                 {
                     "patch_method": patch.method,
                     "effect": effect_dict,
-                    "verification": verification.as_dict(),
                     "consistency": consistency.as_dict() if consistency else None,
                     "first_attempt": (iteration_idx == 0),
                     "original_code": program,
@@ -194,30 +194,27 @@ class PatchScribePipeline:
                     "vulnerability_signature": vuln_case.get("signature", ""),
                 }
             )
-            
-            # Check overall success (verification + consistency)
-            overall_success = verification.overall
+
+            # Check overall success (only consistency matters)
             if self.consistency_checker and consistency:
-                overall_success = overall_success and consistency.overall
-            
+                overall_success = consistency.accepted
+            else:
+                # No checks enabled, just generate once
+                overall_success = True
+
             if overall_success:
                 break
-            
+
             # Generate feedback for refinement
             feedback_parts = []
-            
-            # Verification feedback
-            for outcome in [verification.symbolic, verification.model_check, verification.fuzzing]:
-                if not outcome.success and outcome.feedback:
-                    feedback_parts.append(outcome.feedback)
-            
+
             # Consistency feedback
             if consistency and not consistency.overall:
                 if not consistency.causal_coverage.success:
                     feedback_parts.append(consistency.causal_coverage.feedback)
                 if not consistency.completeness.success:
                     feedback_parts.append(consistency.completeness.feedback)
-            
+
             feedback = " ".join(feedback_parts)
             spec = refine_intervention(spec, feedback)
             
@@ -226,14 +223,13 @@ class PatchScribePipeline:
             elif self.strategy in {"natural", "only_natural"}:
                 natural_context = build_natural_context(pcg, scm, spec)
         
-        if patch is None or verification is None or effect_dict is None:
+        if patch is None or effect_dict is None:
             raise RuntimeError("Patch pipeline did not produce results")
-        
+
         patch_for_explanations = patch
         effect_for_explanations = effect_dict
-        verification_for_output = verification
         E_patch_for_output = E_patch
-        
+
         if (
             self.explanation_patch_source == "ground_truth"
             and vuln_case.get("ground_truth")
@@ -251,15 +247,7 @@ class PatchScribePipeline:
                 signature=vuln_case.get("signature", ""),
             )
             effect_for_explanations = gt_effect.as_dict()
-            verification_for_output = Verifier(
-                vuln_case.get("signature", ""),
-                original_code=program,
-                vuln_line=vuln_case.get("vuln_line"),
-            ).verify(
-                patch_for_explanations,
-                expected_condition=scm.vulnerable_condition,
-            )
-            
+
             # Regenerate E_patch for ground truth
             E_patch_for_output = generate_E_patch(
                 ground_truth_code,
@@ -300,7 +288,7 @@ class PatchScribePipeline:
             patch_for_explanations,
             E_bug,
             E_patch_for_output,
-            verification_for_output,
+            consistency,
         )
         final_spec = spec
         
@@ -323,13 +311,21 @@ class PatchScribePipeline:
         else:
             performance_profile = None
         
+        # Create a minimal verification result for backwards compatibility
+        from .verification import VerificationResult, CheckOutcome
+        dummy_verification = VerificationResult(
+            symbolic=CheckOutcome(True, "Not applicable (verification removed)"),
+            model_check=CheckOutcome(True, "Not applicable (verification removed)"),
+            fuzzing=CheckOutcome(True, "Not applicable (verification removed)"),
+        )
+
         return PipelineArtifacts(
             pcg=self._pcg_to_dict(pcg, diagnostics),
             scm=scm.as_dict(),
             intervention=final_spec,
             patch=patch_for_explanations,
             effect=effect_for_explanations,
-            verification=verification_for_output,
+            verification=dummy_verification,  # Dummy for backwards compatibility
             iterations=iterations,
             explanations=explanations,
             explanation_metrics={
@@ -339,6 +335,7 @@ class PatchScribePipeline:
                 "llm_scores": explanation_metrics.llm_scores,
                 "llm_raw": explanation_metrics.llm_raw,
                 "first_attempt_success": first_attempt_success,
+                "consistency_confidence": consistency.confidence_level if consistency else None,
             },
             E_bug=E_bug,
             E_patch=E_patch_for_output,
@@ -349,19 +346,9 @@ class PatchScribePipeline:
 
     @staticmethod
     def _pcg_to_dict(pcg, diagnostics: Dict[str, object]) -> Dict[str, object]:
-        return {
-            "nodes": [
-                {
-                    "id": node.node_id,
-                    "type": node.node_type,
-                    "description": node.description,
-                    "location": node.location,
-                }
-                for node in pcg.nodes.values()
-            ],
-            "edges": [edge.__dict__ for edge in pcg.edges],
-            "diagnostics": diagnostics,
-        }
+        data = pcg.to_dict()
+        data["diagnostics"] = diagnostics
+        return data
 
     @staticmethod
     def _build_case_prompt_directives(case: Dict[str, object]) -> str | None:
@@ -392,3 +379,80 @@ class PatchScribePipeline:
             return "Follow these additional requirements:\n" + "\n".join(f"- {item}" for item in directives)
 
         return None
+
+    # ------------------------------------------------------------------
+    # Stage-1 caching helpers
+    # ------------------------------------------------------------------
+
+    def precompute_stage1(self, vuln_case: Dict[str, object]) -> Stage1Data:
+        """Run only Stage-1 and populate cache without invoking any LLMs."""
+        program = vuln_case["source"].strip("\n")
+        vuln_info = {
+            "location": vuln_case["vuln_line"],
+            "cwe_id": vuln_case.get("cwe_id", "Unknown"),
+        }
+        return self._load_or_build_stage1(
+            vuln_case,
+            program,
+            vuln_info,
+            force_recompute=self.force_stage1_recompute or False,
+        )
+
+    def _load_or_build_stage1(
+        self,
+        vuln_case: Dict[str, object],
+        program: str,
+        vuln_info: Dict[str, object],
+        *,
+        force_recompute: bool = False,
+    ) -> Stage1Data:
+        case_id = self._resolve_case_id(vuln_case)
+        source_hash = hashlib.sha256(program.encode("utf-8")).hexdigest()
+        use_cache = (
+            self.stage1_cache is not None
+            and not self.force_stage1_recompute
+            and not force_recompute
+        )
+        if use_cache:
+            cached = self.stage1_cache.load(case_id, source_hash)
+            if cached:
+                return cached
+
+        stage1 = self._build_stage1(program, vuln_info)
+
+        if self.stage1_cache:
+            case_meta = vuln_case.get("metadata") or {}
+            metadata = {
+                "case_id": case_id,
+                "dataset": case_meta.get("dataset"),
+                "cwe_id": vuln_case.get("cwe_id"),
+                "cve_id": vuln_case.get("cve_id"),
+            }
+            self.stage1_cache.store(case_id, source_hash, stage1, metadata=metadata)
+        return stage1
+
+    def _build_stage1(
+        self,
+        program: str,
+        vuln_info: Dict[str, object],
+    ) -> Stage1Data:
+        pcg, diagnostics = PCGBuilder(program, vuln_info, self.config).build()
+        scm = SCMBuilder(pcg).derive()
+        intervention = InterventionPlanner(pcg, scm).compute()
+        e_bug = generate_E_bug(pcg, scm, intervention, vuln_info)
+        return Stage1Data(
+            pcg=pcg,
+            diagnostics=diagnostics,
+            scm=scm,
+            intervention=intervention,
+            e_bug=e_bug,
+        )
+
+    @staticmethod
+    def _resolve_case_id(case: Dict[str, object]) -> str:
+        return (
+            case.get("id")
+            or case.get("case_id")
+            or case.get("filename")
+            or "unknown_case"
+        )

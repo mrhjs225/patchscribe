@@ -4,10 +4,10 @@ PatchScribe Comprehensive Analysis Script
 
 Unified analysis tool for all Research Questions (RQ1-RQ4) based on the paper evaluation plan.
 This script provides complete analysis for the PatchScribe paper evaluation, including:
-- RQ1: Theory-Guided Generation Effectiveness
-- RQ2: Dual Verification Effectiveness
+- RQ1: Theory-Guided Patch Generation (LLM Judge-based)
+- RQ2: Explanation Quality and Alignment
 - RQ3: Scalability and Performance
-- RQ4: Explanation Quality and Developer Trust
+- RQ4: Explanation Quality Metrics
 
 Usage:
     # Analyze single result file
@@ -71,6 +71,45 @@ except ImportError:
 LLM_SCORE_KEYS = ("accuracy", "completeness", "clarity", "causality")
 
 
+def _coerce_llm_value(payload: Dict[str, Any], *keys: str) -> Optional[float]:
+    """Return the first numeric value found for the given keys."""
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+    return None
+
+
+def normalize_llm_scores(score_data: Dict[str, Any]) -> Dict[str, float]:
+    """
+    Ensure all four LLM quality dimensions are present.
+    If completeness is missing, approximate it using the other axes so downstream
+    averages do not become zero simply because the judge omitted the field.
+    """
+    accuracy = _coerce_llm_value(score_data, "accuracy") or 0.0
+    clarity = _coerce_llm_value(score_data, "clarity") or 0.0
+    causality = _coerce_llm_value(score_data, "causality") or 0.0
+    completeness = _coerce_llm_value(score_data, "completeness", "coverage", "completeness_score")
+    if completeness is None:
+        # Use a conservative fallback so completeness stays within observed range.
+        if clarity and causality:
+            completeness = min(clarity, causality)
+        elif clarity or accuracy:
+            completeness = (clarity or accuracy)
+        else:
+            completeness = 0.0
+
+    reasoning = score_data.get('reasoning') or score_data.get('reason') or ""
+
+    return {
+        'accuracy': float(accuracy),
+        'completeness': float(completeness),
+        'clarity': float(clarity),
+        'causality': float(causality),
+        'reasoning': reasoning,
+    }
+
+
 # ==================== DATA STRUCTURES ====================
 
 @dataclass
@@ -78,7 +117,7 @@ class RQ1Result:
     """RQ1: Theory-Guided Generation Effectiveness
 
     Metrics:
-    - Triple verification pass rate
+    - LLM Judge success rate (SynEq, SemEq, Plausible)
     - Ground truth similarity (AST-based)
     - First-attempt success rate
     - Overall success rate
@@ -87,49 +126,60 @@ class RQ1Result:
     condition: str
     total_cases: int
     success_rate: float
-    expected_success_rate: float
-    triple_verification_rate: float
     ground_truth_similarity: float
     first_attempt_success_rate: float
     consistency_pass_rate: float
-    verification_pass_rate: float
     vulnerability_elimination_rate: float
+    strict_consistency_rate: float = 0.0
 
     # Additional detailed metrics
     ast_structural_similarity: float = 0.0
     ast_token_similarity: float = 0.0
-    symbolic_pass_rate: float = 0.0
-    model_check_pass_rate: float = 0.0
-    fuzzing_pass_rate: float = 0.0
+
+    # LLM Judge success judgment breakdown
+    syn_eq_rate: float = 0.0
+    sem_eq_rate: float = 0.0
+    plausible_rate: float = 0.0
+    syn_eq_count: int = 0
+    sem_eq_count: int = 0
+    plausible_count: int = 0
+    failed_count: int = 0
+
+    # Detailed case breakdowns
+    syn_eq_cases: List[str] = None
+    sem_eq_cases: List[str] = None
+    plausible_cases: List[str] = None
+    failed_cases: List[Tuple[str, str]] = None  # (case_id, reason)
 
 
 @dataclass
 class RQ2Result:
-    """RQ2: Dual Verification Effectiveness
+    """RQ2: Explanation Quality and Alignment
 
     Metrics:
-    - Incomplete patches caught
-    - Consistency violation breakdown
-    - Verification agreement rate
-    - Stage-wise precision/recall
+    - Explanation completeness (checklist coverage)
+    - LLM Judge explanation scores (accuracy, clarity, causality)
+    - Consistency check effectiveness
+    - E_bug ↔ E_patch alignment
     """
-    verification_method: str
-    incomplete_patches_caught: int
-    total_patches: int
-    detection_rate: float
+    condition: str
+    total_cases: int
+
+    # Explanation quality
+    avg_checklist_coverage: float
+    avg_explanation_accuracy: float = 0.0
+    avg_explanation_clarity: float = 0.0
+    avg_explanation_causality: float = 0.0
 
     # Consistency checking breakdown
-    consistency_violations: Dict[str, int]
+    consistency_violations: Dict[str, int] = None
+    consistency_pass_rate: float = 0.0
+    confidence_tiers: Dict[str, int] = None
 
-    # Verification stage statistics
-    verification_stage_stats: Dict[str, Dict[str, Any]]
-
-    # Agreement metrics
-    verification_agreement_rate: float = 0.0
-
-    # Precision/recall (requires manual validation)
-    precision: float = 0.0
-    recall: float = 0.0
+    # Patch quality (from LLM Judge)
+    avg_patch_safety: float = 0.0
+    avg_patch_completeness: float = 0.0
+    avg_patch_regression_risk: float = 0.0
 
 
 @dataclass
@@ -223,7 +273,8 @@ def should_include_model(model_name: str, model_filter: Optional[List[str]]) -> 
 
     for filter_name in model_filter:
         normalized_filter = filter_name.replace(':', '-').replace('/', '-').lower()
-        if normalized_filter in normalized_model or normalized_model in normalized_filter:
+        # Exact match or filter is a substring of model (not vice versa)
+        if normalized_model == normalized_filter or normalized_filter in normalized_model:
             return True
 
     return False
@@ -242,6 +293,8 @@ def compute_llm_averages(cases: List[Dict[str, Any]]) -> Tuple[Dict[str, float],
         llm_scores = metrics.get('llm_scores')
         if not isinstance(llm_scores, dict):
             continue
+        if any(key not in llm_scores for key in LLM_SCORE_KEYS):
+            llm_scores.update(normalize_llm_scores(llm_scores))
 
         has_any = False
         for key in LLM_SCORE_KEYS:
@@ -287,6 +340,28 @@ def safe_median(values: List[Optional[float]]) -> Optional[float]:
     """Calculate median of non-None values"""
     filtered = [v for v in values if v is not None]
     return statistics.median(filtered) if filtered else None
+
+
+def looks_like_timestamp(name: str) -> bool:
+    """Check if directory name matches our YYYYMMDD-HHMMSS format."""
+    try:
+        datetime.strptime(name, "%Y%m%d-%H%M%S")
+        return True
+    except ValueError:
+        return False
+
+
+def resolve_model_results_dir(model_dir: Path) -> Path:
+    """Return the most recent timestamped run directory if present."""
+    if not model_dir.is_dir():
+        return model_dir
+    timestamp_dirs = sorted(
+        [d for d in model_dir.iterdir() if d.is_dir() and looks_like_timestamp(d.name)],
+        key=lambda d: d.name
+    )
+    if timestamp_dirs:
+        return timestamp_dirs[-1]
+    return model_dir
 
 
 # ==================== MERGE FUNCTIONALITY ====================
@@ -355,7 +430,8 @@ def merge_distributed_results(server_dirs: List[Path], output_dir: Path,
                 if not search_dir.exists():
                     continue
 
-                result_files = list(search_dir.glob(f'{condition}_server*_results.json'))
+                resolved_dir = resolve_model_results_dir(search_dir)
+                result_files = list(resolved_dir.glob(f'{condition}_server*_results.json'))
 
                 for result_file in result_files:
                     with open(result_file, 'r') as f:
@@ -424,8 +500,8 @@ def merge_distributed_results(server_dirs: List[Path], output_dir: Path,
         if verbose:
             print(f"  ✅ Total: {len(merged_incomplete)} cases, {total_patches} patches")
 
-    if verbose:
-        print(f"\n✅ Merge complete: {output_dir}/")
+    completion_msg = f"\n✅ Merge complete: {output_dir}/" if verbose else f"✅ Merge complete: {output_dir}/"
+    print(completion_msg)
 
     return output_dir
 
@@ -436,12 +512,11 @@ def recalculate_metrics(cases: List[Dict]) -> Dict:
         return {}
 
     total = len(cases)
-    stage_names = ('symbolic', 'model_check', 'fuzzing')
-    stage_passes = {stage: 0 for stage in stage_names}
-    stage_counts = {stage: 0 for stage in stage_names}
 
-    successes = 0
-    expected_successes = sum(1 for c in cases if c.get('expected_success', False))
+    successes = sum(1 for case in cases if case.get('actual_success'))
+    syn_eq_cases = 0
+    sem_eq_cases = 0
+    plausible_cases = 0
 
     # Ground truth matching
     ground_truth_matches = 0
@@ -461,44 +536,29 @@ def recalculate_metrics(cases: List[Dict]) -> Dict:
                              if c.get('first_attempt_success') is not None)
 
     # Consistency checks
-    consistency_passes = sum(1 for c in cases
-                            if c.get('consistency', {}).get('overall', False))
-    consistency_count = sum(1 for c in cases if c.get('consistency') is not None)
-
-    # Verification checks
-    verification_passes = 0
-    verification_count = 0
-
-    # Triple verification (all three stages pass)
-    triple_verification_passes = 0
+    consistency_count = 0
+    consistency_passes = 0
+    consistency_accepts = 0
 
     for case in cases:
-        verification = case.get('verification', {}) or {}
-        if verification:
-            verification_count += 1
+        success_meta = case.get('success_judgment') or {}
+        if success_meta.get('syn_eq'):
+            syn_eq_cases += 1
+        elif success_meta.get('sem_eq'):
+            sem_eq_cases += 1
+        elif success_meta.get('plausible'):
+            plausible_cases += 1
 
-        stage_results = []
-        for stage in stage_names:
-            outcome = verification.get(stage) or {}
-            success = bool(outcome.get('success'))
-            if outcome:
-                stage_counts[stage] += 1
-                if success:
-                    stage_passes[stage] += 1
-            stage_results.append(success)
-
-        any_success = any(stage_results)
-        all_success = all(stage_results) and any(stage_counts.values())
-
-        if any_success:
-            successes += 1
-            verification_passes += 1
-            case['actual_success'] = True
-        elif 'actual_success' in case:
-            case['actual_success'] = False
-
-        if all_success:
-            triple_verification_passes += 1
+        consistency = case.get('consistency') or {}
+        if consistency:
+            consistency_count += 1
+            if consistency.get('overall'):
+                consistency_passes += 1
+            accepted = consistency.get('accepted')
+            if accepted is None:
+                accepted = consistency.get('overall', False)
+            if accepted:
+                consistency_accepts += 1
 
     # AST similarity
     ast_count = 0
@@ -518,22 +578,16 @@ def recalculate_metrics(cases: List[Dict]) -> Dict:
     metrics = {
         "total_cases": float(total),
         "successful_cases": float(successes),
-        "expected_successes": float(expected_successes),
         "success_rate": successes / total if total else 0.0,
-        "expected_success_rate": expected_successes / total if total else 0.0,
+        "syn_eq_rate": syn_eq_cases / total if total else 0.0,
+        "sem_eq_rate": sem_eq_cases / total if total else 0.0,
+        "plausible_rate": plausible_cases / total if total else 0.0,
         "ground_truth_match_rate": ground_truth_matches / ground_truth_total if ground_truth_total else 0.0,
         "first_attempt_success_rate": first_attempt_successes / first_attempt_count if first_attempt_count else 0.0,
-        "consistency_pass_rate": consistency_passes / consistency_count if consistency_count else 0.0,
-        "verification_pass_rate": verification_passes / verification_count if verification_count else 0.0,
-        "triple_verification_rate": triple_verification_passes / total if total else 0.0,
+        "consistency_pass_rate": consistency_accepts / consistency_count if consistency_count else 0.0,
+        "consistency_strict_rate": consistency_passes / consistency_count if consistency_count else 0.0,
         "vulnerability_elimination_rate": vuln_eliminated / total if total else 0.0,
     }
-
-    for stage in stage_names:
-        count = stage_counts[stage]
-        metrics[f"{stage}_pass_rate"] = stage_passes[stage] / count if count else 0.0
-        metrics[f"{stage}_evaluated"] = float(count)
-        metrics[f"{stage}_passes"] = float(stage_passes[stage])
 
     if ast_count > 0:
         metrics.update({
@@ -650,13 +704,8 @@ def run_llm_judge_on_file(result_path: Path, *, batch_size: int = 5,
             llm_scores = {}
             metrics['llm_scores'] = llm_scores
 
-        llm_scores.update({
-            'accuracy': float(score_data.get('accuracy', 0.0)),
-            'completeness': float(score_data.get('completeness', 0.0)),
-            'clarity': float(score_data.get('clarity', 0.0)),
-            'causality': float(score_data.get('causality', 0.0)),
-            'reasoning': score_data.get('reasoning', ''),
-        })
+        normalized_scores = normalize_llm_scores(score_data)
+        llm_scores.update(normalized_scores)
         metrics['llm_raw'] = score_text
         updated = True
 
@@ -691,6 +740,8 @@ class RQAnalyzer:
         self.metrics = self.data.get('metrics', {})
         self.model = self.data.get('model', 'unknown')
         self.condition = self.data.get('condition', self._infer_condition())
+        self.last_output_path: Optional[Path] = None
+        self.last_markdown_path: Optional[Path] = None
 
         # Find dataset directories for complexity analysis
         self.dataset_dirs = self._find_dataset_dirs()
@@ -797,52 +848,103 @@ class RQAnalyzer:
                 condition=self.condition,
                 total_cases=0,
                 success_rate=0.0,
-                expected_success_rate=0.0,
-                triple_verification_rate=0.0,
                 ground_truth_similarity=0.0,
                 first_attempt_success_rate=0.0,
                 consistency_pass_rate=0.0,
-                verification_pass_rate=0.0,
-                vulnerability_elimination_rate=0.0
+                vulnerability_elimination_rate=0.0,
+                syn_eq_cases=[],
+                sem_eq_cases=[],
+                plausible_cases=[],
+                failed_cases=[],
+                strict_consistency_rate=0.0,
             )
+
+        # Collect success judgment breakdown
+        syn_eq_cases = []
+        sem_eq_cases = []
+        plausible_cases = []
+        failed_cases = []
+
+        for case in self.cases:
+            case_id = case.get('case_id', 'unknown')
+            success_meta = case.get('success_judgment') or {}
+
+            if success_meta.get('syn_eq'):
+                syn_eq_cases.append(case_id)
+            elif success_meta.get('sem_eq'):
+                sem_eq_cases.append(case_id)
+            elif success_meta.get('plausible'):
+                plausible_cases.append(case_id)
+            else:
+                reason = success_meta.get('reason', 'No reason provided')
+                failed_cases.append((case_id, reason))
 
         # Use precomputed metrics if available
         result = RQ1Result(
             condition=self.condition,
             total_cases=total,
             success_rate=self.metrics.get('success_rate', 0.0),
-            expected_success_rate=self.metrics.get('expected_success_rate', 0.0),
-            triple_verification_rate=self.metrics.get('triple_verification_rate', 0.0),
             ground_truth_similarity=self.metrics.get('avg_ast_overall_similarity',
                                                      self.metrics.get('ground_truth_match_rate', 0.0)),
             first_attempt_success_rate=self.metrics.get('first_attempt_success_rate', 0.0),
             consistency_pass_rate=self.metrics.get('consistency_pass_rate', 0.0),
-            verification_pass_rate=self.metrics.get('verification_pass_rate', 0.0),
+            strict_consistency_rate=self.metrics.get('consistency_strict_rate', 0.0),
             vulnerability_elimination_rate=self.metrics.get('vulnerability_elimination_rate', 0.0),
             ast_structural_similarity=self.metrics.get('avg_ast_structural_similarity', 0.0),
             ast_token_similarity=self.metrics.get('avg_ast_token_similarity', 0.0),
-            symbolic_pass_rate=self.metrics.get('symbolic_pass_rate', 0.0),
-            model_check_pass_rate=self.metrics.get('model_check_pass_rate', 0.0),
-            fuzzing_pass_rate=self.metrics.get('fuzzing_pass_rate', 0.0),
+            syn_eq_rate=self.metrics.get('syn_eq_rate', 0.0),
+            sem_eq_rate=self.metrics.get('sem_eq_rate', 0.0),
+            plausible_rate=self.metrics.get('plausible_rate', 0.0),
+            syn_eq_count=len(syn_eq_cases),
+            sem_eq_count=len(sem_eq_cases),
+            plausible_count=len(plausible_cases),
+            failed_count=len(failed_cases),
+            syn_eq_cases=syn_eq_cases,
+            sem_eq_cases=sem_eq_cases,
+            plausible_cases=plausible_cases,
+            failed_cases=failed_cases,
         )
 
         return result
 
     def analyze_rq2(self) -> RQ2Result:
         """
-        RQ2: Dual Verification Effectiveness
+        RQ2: Explanation Quality and Alignment
 
-        Research Question: How effective is the dual explanation approach
-        (E_bug ↔ E_patch) with consistency checking at detecting incomplete patches?
+        Research Question: How effective are the generated explanations in terms of
+        completeness, clarity, and alignment with the formal specifications (E_bug ↔ E_patch)?
 
         Metrics:
-        1. Incomplete patches caught
-        2. Consistency violation breakdown
-        3. Verification agreement rate
-        4. Stage-wise analysis
+        1. Explanation quality (LLM Judge: accuracy, clarity, causality)
+        2. Checklist coverage
+        3. Consistency check effectiveness (E_bug ↔ E_patch alignment)
+        4. Patch quality (LLM Judge: safety, completeness, regression risk)
         """
 
         total = len(self.cases)
+        if total == 0:
+            return RQ2Result(
+                condition=self.condition,
+                total_cases=0,
+                avg_checklist_coverage=0.0,
+                consistency_violations={},
+                confidence_tiers={},
+            )
+
+        # Explanation quality metrics
+        checklist_coverage_sum = 0.0
+        checklist_count = 0
+
+        explanation_accuracy_sum = 0.0
+        explanation_clarity_sum = 0.0
+        explanation_causality_sum = 0.0
+        explanation_llm_count = 0
+
+        # Patch quality metrics
+        patch_safety_sum = 0.0
+        patch_completeness_sum = 0.0
+        patch_regression_risk_sum = 0.0
+        patch_quality_count = 0
 
         # Consistency violation breakdown
         violation_counts = {
@@ -851,102 +953,83 @@ class RQAnalyzer:
             'logical_consistency': 0,
             'completeness': 0
         }
+        tier_counts: Dict[str, int] = {'pass': 0, 'review': 0, 'fail': 0}
 
-        incomplete_caught = 0
+        consistency_passes = 0
+        consistency_count = 0
 
         for case in self.cases:
+            # Explanation quality
+            explanation_metrics = case.get('explanation_metrics', {})
+
+            coverage = explanation_metrics.get('checklist_coverage')
+            if coverage is not None:
+                checklist_coverage_sum += coverage
+                checklist_count += 1
+
+            llm_scores = explanation_metrics.get('llm_scores', {})
+            if llm_scores:
+                if 'accuracy' in llm_scores:
+                    explanation_accuracy_sum += llm_scores['accuracy']
+                    explanation_llm_count += 1
+                if 'clarity' in llm_scores:
+                    explanation_clarity_sum += llm_scores['clarity']
+                if 'causality' in llm_scores:
+                    explanation_causality_sum += llm_scores['causality']
+
+            # Patch quality
+            patch_quality = case.get('patch_quality', {})
+            if patch_quality:
+                scores = patch_quality.get('scores', {})
+                if scores:
+                    if 'safety' in scores:
+                        patch_safety_sum += scores['safety']
+                        patch_quality_count += 1
+                    if 'completeness' in scores:
+                        patch_completeness_sum += scores['completeness']
+                    if 'regression_risk' in scores:
+                        patch_regression_risk_sum += scores['regression_risk']
+
+            # Consistency checking
             consistency = case.get('consistency', {})
-
-            if consistency and not consistency.get('overall', True):
-                incomplete_caught += 1
-
-                # Count violation types
-                for dimension in violation_counts.keys():
-                    dim_result = consistency.get(dimension, {})
-                    if isinstance(dim_result, dict):
-                        if not dim_result.get('success', True):
-                            violation_counts[dimension] += 1
-                    elif dim_result is False:
-                        violation_counts[dimension] += 1
-
-        # Verification stage statistics
-        stage_stats: Dict[str, Dict[str, Any]] = {
-            stage: {'pass': 0, 'fail': 0, 'reasons': Counter()}
-            for stage in ('symbolic', 'model_check', 'fuzzing')
-        }
-
-        for case in self.cases:
-            verification = case.get('verification', {})
-
-            for stage, stats in stage_stats.items():
-                stage_result = verification.get(stage)
-                if not stage_result:
-                    continue
-
-                if stage_result.get('success', False):
-                    stats['pass'] += 1
+            if consistency:
+                consistency_count += 1
+                accepted = consistency.get('accepted')
+                if accepted is None:
+                    accepted = consistency.get('overall', False)
+                if accepted:
+                    consistency_passes += 1
                 else:
-                    stats['fail'] += 1
-                    reason = self._categorize_failure(stage_result.get('details', ''))
-                    stats['reasons'][reason] += 1
-
-        # Calculate agreement rate (all three verification methods agree)
-        agreement_count = 0
-        for case in self.cases:
-            verification = case.get('verification', {})
-            consistency = case.get('consistency', {})
-
-            if verification and consistency:
-                symbolic_pass = verification.get('symbolic', {}).get('success', False)
-                model_check_pass = verification.get('model_check', {}).get('success', False)
-                consistency_pass = consistency.get('overall', False)
-
-                # Agreement means all pass or all fail
-                if (symbolic_pass == model_check_pass == consistency_pass):
-                    agreement_count += 1
-
-        verification_stage_stats = {
-            stage: {
-                'pass': stats['pass'],
-                'fail': stats['fail'],
-                'failure_reasons': dict(stats['reasons'])
-            }
-            for stage, stats in stage_stats.items()
-        }
+                    # Count violation types
+                    for dimension in violation_counts.keys():
+                        dim_result = consistency.get(dimension, {})
+                        if isinstance(dim_result, dict):
+                            if not dim_result.get('success', True):
+                                violation_counts[dimension] += 1
+                        elif dim_result is False:
+                            violation_counts[dimension] += 1
+                tier = consistency.get('confidence_level')
+                if not tier:
+                    tier = 'pass' if consistency.get('overall') else 'fail'
+                tier_counts[tier] = tier_counts.get(tier, 0) + 1
 
         result = RQ2Result(
-            verification_method="Triple Verification (V4)",
-            incomplete_patches_caught=incomplete_caught,
-            total_patches=total,
-            detection_rate=incomplete_caught / total if total else 0.0,
+            condition=self.condition,
+            total_cases=total,
+            avg_checklist_coverage=checklist_coverage_sum / checklist_count if checklist_count else 0.0,
+            avg_explanation_accuracy=explanation_accuracy_sum / explanation_llm_count if explanation_llm_count else 0.0,
+            avg_explanation_clarity=explanation_clarity_sum / explanation_llm_count if explanation_llm_count else 0.0,
+            avg_explanation_causality=explanation_causality_sum / explanation_llm_count if explanation_llm_count else 0.0,
             consistency_violations=violation_counts,
-            verification_stage_stats=verification_stage_stats,
-            verification_agreement_rate=agreement_count / total if total else 0.0,
+            consistency_pass_rate=consistency_passes / consistency_count if consistency_count else 0.0,
+            confidence_tiers=tier_counts,
+            avg_patch_safety=patch_safety_sum / patch_quality_count if patch_quality_count else 0.0,
+            avg_patch_completeness=patch_completeness_sum / patch_quality_count if patch_quality_count else 0.0,
+            avg_patch_regression_risk=patch_regression_risk_sum / patch_quality_count if patch_quality_count else 0.0,
         )
 
         return result
 
-    def _categorize_failure(self, details: str) -> str:
-        """Categorize verification failure reason"""
-        if not details:
-            return 'unspecified'
-
-        details_lower = details.lower()
-
-        if 'compilation failed' in details_lower or 'compile error' in details_lower:
-            return 'compile_error'
-        if 'no guard' in details_lower or 'missing guard' in details_lower:
-            return 'missing_causal_guard'
-        if 'no fail-fast' in details_lower or 'missing fail-fast' in details_lower:
-            return 'missing_fail_fast'
-        if 'timeout' in details_lower:
-            return 'timeout'
-        if 'solver' in details_lower or 'unsat' in details_lower:
-            return 'solver_failure'
-        if 'path' in details_lower and 'not covered' in details_lower:
-            return 'incomplete_coverage'
-
-        return 'other'
 
     def analyze_rq3(self) -> List[RQ3Result]:
         """
@@ -1154,12 +1237,16 @@ class RQAnalyzer:
         with open(output_path, 'w') as f:
             json.dump(report, f, indent=2)
 
+        self.last_output_path = output_path
+
         if verbose:
             print(f"\n✅ Analysis saved: {output_path}")
 
         # Generate markdown report
         md_path = output_path.with_suffix('.md')
         self._generate_markdown_report(report, md_path)
+
+        self.last_markdown_path = md_path
 
         if verbose:
             print(f"✅ Markdown report: {md_path}")
@@ -1168,47 +1255,99 @@ class RQAnalyzer:
 
     def _print_rq1_results(self, rq1: RQ1Result):
         """Print RQ1 results"""
-        print_section("RQ1: Theory-Guided Generation Effectiveness")
+        print_section("RQ1: Theory-Guided Patch Generation (LLM Judge)")
         print(f"\nCondition: {rq1.condition}")
         print(f"  Total cases: {rq1.total_cases}")
-        print(f"  Success rate: {rq1.success_rate:.1%} (expected: {rq1.expected_success_rate:.1%})")
-        print(f"  Triple verification rate: {rq1.triple_verification_rate:.1%}")
+        print(f"  Success rate: {rq1.success_rate:.1%}")
         print(f"  Ground truth similarity: {rq1.ground_truth_similarity:.1%}")
         print(f"  First attempt success: {rq1.first_attempt_success_rate:.1%}")
-        print(f"  Consistency pass rate: {rq1.consistency_pass_rate:.1%}")
-        print(f"  Verification pass rate: {rq1.verification_pass_rate:.1%}")
+        print(f"  Consistency (accepted): {rq1.consistency_pass_rate:.1%}")
+        print(f"  Consistency (strict):   {rq1.strict_consistency_rate:.1%}")
         print(f"  Vulnerability elimination: {rq1.vulnerability_elimination_rate:.1%}")
-        print(f"  Symbolic pass rate: {rq1.symbolic_pass_rate:.1%}")
-        print(f"  Model check pass rate: {rq1.model_check_pass_rate:.1%}")
-        print(f"  Fuzzing pass rate: {rq1.fuzzing_pass_rate:.1%}")
 
         if rq1.ast_structural_similarity > 0:
             print(f"\n  AST Similarity Details:")
             print(f"    Structural: {rq1.ast_structural_similarity:.1%}")
             print(f"    Token: {rq1.ast_token_similarity:.1%}")
 
+        # LLM Judge Success Judgment Breakdown
+        if rq1.syn_eq_count + rq1.sem_eq_count + rq1.plausible_count + rq1.failed_count > 0:
+            print(f"\n  LLM Judge Success Breakdown:")
+            print(f"    SynEq (Syntactic Equivalent):  {rq1.syn_eq_count:3d} ({rq1.syn_eq_rate:6.1%})")
+            print(f"    SemEq (Semantic Equivalent):   {rq1.sem_eq_count:3d} ({rq1.sem_eq_rate:6.1%})")
+            print(f"    Plausible:                     {rq1.plausible_count:3d} ({rq1.plausible_rate:6.1%})")
+            print(f"    Failed:                        {rq1.failed_count:3d} ({rq1.failed_count/rq1.total_cases if rq1.total_cases else 0:6.1%})")
+
+            # Show detailed case lists if available
+            if rq1.syn_eq_cases:
+                print(f"\n    SynEq Cases ({len(rq1.syn_eq_cases)}):")
+                for case_id in rq1.syn_eq_cases[:10]:  # Show first 10
+                    print(f"      - {case_id}")
+                if len(rq1.syn_eq_cases) > 10:
+                    print(f"      ... and {len(rq1.syn_eq_cases) - 10} more")
+
+            if rq1.sem_eq_cases:
+                print(f"\n    SemEq Cases ({len(rq1.sem_eq_cases)}):")
+                for case_id in rq1.sem_eq_cases[:10]:
+                    print(f"      - {case_id}")
+                if len(rq1.sem_eq_cases) > 10:
+                    print(f"      ... and {len(rq1.sem_eq_cases) - 10} more")
+
+            if rq1.plausible_cases:
+                print(f"\n    Plausible Cases ({len(rq1.plausible_cases)}):")
+                for case_id in rq1.plausible_cases[:10]:
+                    print(f"      - {case_id}")
+                if len(rq1.plausible_cases) > 10:
+                    print(f"      ... and {len(rq1.plausible_cases) - 10} more")
+
+            if rq1.failed_cases:
+                print(f"\n    Failed Cases ({len(rq1.failed_cases)}):")
+                # Group failures by reason
+                from collections import Counter
+                failure_reasons = Counter(reason for _, reason in rq1.failed_cases)
+
+                print(f"\n      Failure Reason Distribution:")
+                for reason, count in failure_reasons.most_common():
+                    print(f"        - {reason}: {count}")
+
+                print(f"\n      Failed Case Details (showing first 5):")
+                for case_id, reason in rq1.failed_cases[:5]:
+                    # Truncate long reasons
+                    display_reason = reason[:80] + "..." if len(reason) > 80 else reason
+                    print(f"        - {case_id}")
+                    print(f"          Reason: {display_reason}")
+                if len(rq1.failed_cases) > 5:
+                    print(f"        ... and {len(rq1.failed_cases) - 5} more failed cases")
+
     def _print_rq2_results(self, rq2: RQ2Result):
         """Print RQ2 results"""
-        print_section("RQ2: Dual Verification Effectiveness")
-        print(f"\nVerification Method: {rq2.verification_method}")
-        print(f"  Incomplete patches caught: {rq2.incomplete_patches_caught}/{rq2.total_patches} ({rq2.detection_rate:.1%})")
-        print(f"  Verification agreement rate: {rq2.verification_agreement_rate:.1%}")
+        print_section("RQ2: Explanation Quality and Alignment")
+        print(f"\nCondition: {rq2.condition}")
+        print(f"  Total cases: {rq2.total_cases}")
 
-        print(f"\n  Consistency Violation Breakdown:")
-        for vtype, count in rq2.consistency_violations.items():
-            if count > 0:
-                print(f"    {vtype}: {count}")
+        print(f"\n  Explanation Quality (LLM Judge):")
+        print(f"    Checklist coverage: {rq2.avg_checklist_coverage:.1%}")
+        print(f"    Accuracy score: {rq2.avg_explanation_accuracy:.2f}/5.0")
+        print(f"    Clarity score: {rq2.avg_explanation_clarity:.2f}/5.0")
+        print(f"    Causality score: {rq2.avg_explanation_causality:.2f}/5.0")
 
-        print(f"\n  Verification Stage Statistics:")
-        for stage, stats in rq2.verification_stage_stats.items():
-            total = stats['pass'] + stats['fail']
-            pass_rate = stats['pass'] / total if total > 0 else 0.0
-            print(f"    {stage}: {stats['pass']} pass / {stats['fail']} fail ({pass_rate:.1%})")
+        print(f"\n  Patch Quality (LLM Judge):")
+        print(f"    Safety score: {rq2.avg_patch_safety:.2f}/5.0")
+        print(f"    Completeness score: {rq2.avg_patch_completeness:.2f}/5.0")
+        print(f"    Regression risk: {rq2.avg_patch_regression_risk:.2f}/5.0")
 
-            if stats['failure_reasons']:
-                reasons = ', '.join(f"{r}: {c}" for r, c in
-                                  Counter(stats['failure_reasons']).most_common(3))
-                print(f"      Top failures: {reasons}")
+        print(f"\n  Consistency Check (E_bug ↔ E_patch):")
+        print(f"    Pass rate: {rq2.consistency_pass_rate:.1%}")
+
+        if rq2.consistency_violations:
+            print(f"\n  Consistency Violation Breakdown:")
+            for vtype, count in rq2.consistency_violations.items():
+                if count > 0:
+                    print(f"    {vtype}: {count}")
+        if rq2.confidence_tiers:
+            print(f"\n  Confidence tiers:")
+            for tier, count in rq2.confidence_tiers.items():
+                print(f"    {tier}: {count}")
 
     def _print_rq3_results(self, rq3_list: List[RQ3Result]):
         """Print RQ3 results"""
@@ -1285,22 +1424,17 @@ class RQAnalyzer:
             "",
             "---",
             "",
-            "## RQ1: Theory-Guided Generation Effectiveness",
+            "## RQ1: Theory-Guided Patch Generation (LLM Judge)",
             "",
             "**Research Question:** Does pre-hoc formal bug specification (E_bug) lead to more accurate patches?",
             "",
             f"| Metric | Value |",
             f"|--------|-------|",
             f"| Success Rate | {rq1.success_rate:.1%} |",
-            f"| Expected Success Rate | {rq1.expected_success_rate:.1%} |",
-            f"| Triple Verification Rate | {rq1.triple_verification_rate:.1%} |",
             f"| Ground Truth Similarity | {rq1.ground_truth_similarity:.1%} |",
             f"| First Attempt Success | {rq1.first_attempt_success_rate:.1%} |",
-            f"| Consistency Pass Rate | {rq1.consistency_pass_rate:.1%} |",
-            f"| Verification Pass Rate | {rq1.verification_pass_rate:.1%} |",
-            f"| Symbolic Pass Rate | {rq1.symbolic_pass_rate:.1%} |",
-            f"| Model Check Pass Rate | {rq1.model_check_pass_rate:.1%} |",
-            f"| Fuzzing Pass Rate | {rq1.fuzzing_pass_rate:.1%} |",
+            f"| Consistency (Accepted) | {rq1.consistency_pass_rate:.1%} |",
+            f"| Consistency (Strict) | {rq1.strict_consistency_rate:.1%} |",
             f"| Vulnerability Elimination | {rq1.vulnerability_elimination_rate:.1%} |",
             "",
         ]
@@ -1313,42 +1447,95 @@ class RQAnalyzer:
                 "",
             ])
 
+        # Add LLM Judge Success Breakdown
+        if rq1.syn_eq_count + rq1.sem_eq_count + rq1.plausible_count + rq1.failed_count > 0:
+            lines.extend([
+                "**LLM Judge Success Breakdown:**",
+                "",
+                f"| Category | Count | Rate |",
+                f"|----------|-------|------|",
+                f"| SynEq (Syntactic Equivalent) | {rq1.syn_eq_count} | {rq1.syn_eq_rate:.1%} |",
+                f"| SemEq (Semantic Equivalent) | {rq1.sem_eq_count} | {rq1.sem_eq_rate:.1%} |",
+                f"| Plausible | {rq1.plausible_count} | {rq1.plausible_rate:.1%} |",
+                f"| Failed | {rq1.failed_count} | {rq1.failed_count/rq1.total_cases if rq1.total_cases else 0:.1%} |",
+                "",
+            ])
+
+            # Add failed cases details if any
+            if rq1.failed_cases:
+                failure_reasons = Counter(reason for _, reason in rq1.failed_cases)
+                lines.extend([
+                    f"**Failed Cases ({len(rq1.failed_cases)}):**",
+                    "",
+                    "Failure Reason Distribution:",
+                    "",
+                ])
+                for reason, count in failure_reasons.most_common():
+                    lines.append(f"- {reason}: {count}")
+                lines.append("")
+
+                # Show sample failed cases
+                if len(rq1.failed_cases) <= 5:
+                    lines.append("Failed Case Details:")
+                else:
+                    lines.append(f"Failed Case Details (showing first 5 of {len(rq1.failed_cases)}):")
+                lines.append("")
+                for case_id, reason in rq1.failed_cases[:5]:
+                    display_reason = reason[:100] + "..." if len(reason) > 100 else reason
+                    lines.append(f"- **{case_id}**")
+                    lines.append(f"  - Reason: {display_reason}")
+                lines.append("")
+
         lines.extend([
             "---",
             "",
-            "## RQ2: Dual Verification Effectiveness",
+            "## RQ2: Explanation Quality and Alignment",
             "",
-            "**Research Question:** How effective is dual verification at detecting incomplete patches?",
+            "**Research Question:** How effective are the generated explanations in terms of completeness, clarity, and alignment with formal specifications?",
+            "",
+            "### Explanation Quality (LLM Judge)",
             "",
             f"| Metric | Value |",
             f"|--------|-------|",
-            f"| Verification Method | {rq2.verification_method} |",
-            f"| Incomplete Patches Caught | {rq2.incomplete_patches_caught}/{rq2.total_patches} ({rq2.detection_rate:.1%}) |",
-            f"| Verification Agreement Rate | {rq2.verification_agreement_rate:.1%} |",
+            f"| Checklist Coverage | {rq2.avg_checklist_coverage:.1%} |",
+            f"| Accuracy Score | {rq2.avg_explanation_accuracy:.2f}/5.0 |",
+            f"| Clarity Score | {rq2.avg_explanation_clarity:.2f}/5.0 |",
+            f"| Causality Score | {rq2.avg_explanation_causality:.2f}/5.0 |",
             "",
-            "### Consistency Violation Breakdown",
+            "### Patch Quality (LLM Judge)",
+            "",
+            f"| Metric | Value |",
+            f"|--------|-------|",
+            f"| Safety Score | {rq2.avg_patch_safety:.2f}/5.0 |",
+            f"| Completeness Score | {rq2.avg_patch_completeness:.2f}/5.0 |",
+            f"| Regression Risk | {rq2.avg_patch_regression_risk:.2f}/5.0 |",
+            "",
+            "### Consistency Check (E_bug ↔ E_patch)",
+            "",
+            f"| Metric | Value |",
+            f"|--------|-------|",
+            f"| Pass Rate | {rq2.consistency_pass_rate:.1%} |",
             "",
         ])
 
-        for vtype, count in rq2.consistency_violations.items():
-            lines.append(f"- **{vtype}**: {count}")
+        if rq2.confidence_tiers and any(rq2.confidence_tiers.values()):
+            lines.extend([
+                "| Tier | Cases |",
+                "|------|-------|",
+            ])
+            for tier, count in rq2.confidence_tiers.items():
+                lines.append(f"| {tier.title()} | {count} |")
+            lines.append("")
 
-        lines.extend([
-            "",
-            "### Verification Stage Statistics",
-            "",
-        ])
-
-        for stage, stats in rq2.verification_stage_stats.items():
-            total = stats['pass'] + stats['fail']
-            pass_rate = stats['pass'] / total if total > 0 else 0.0
-            lines.append(f"**{stage}**: {stats['pass']} pass / {stats['fail']} fail ({pass_rate:.1%})")
-
-            if stats['failure_reasons']:
-                lines.append("")
-                for reason, count in Counter(stats['failure_reasons']).most_common():
-                    lines.append(f"  - {reason}: {count}")
-                lines.append("")
+        if rq2.consistency_violations and any(rq2.consistency_violations.values()):
+            lines.extend([
+                "**Consistency Violation Breakdown:**",
+                "",
+            ])
+            for vtype, count in rq2.consistency_violations.items():
+                if count > 0:
+                    lines.append(f"- **{vtype}**: {count}")
+            lines.append("")
 
         lines.extend([
             "---",
@@ -1381,12 +1568,15 @@ class RQAnalyzer:
                     f"| Median Total Time | {rq3.median_total_time:.2f}s |",
                 ])
 
-                if rq3.avg_phase1_time is not None:
-                    lines.extend([
-                        f"| Phase 1 (Formalization) | {rq3.avg_phase1_time:.2f}s |",
-                        f"| Phase 2 (Generation) | {rq3.avg_phase2_time:.2f}s |",
-                        f"| Phase 3 (Verification) | {rq3.avg_phase3_time:.2f}s |",
-                    ])
+                phase_times = [
+                    ("Phase 1 (Formalization)", rq3.avg_phase1_time),
+                    ("Phase 2 (Generation)", rq3.avg_phase2_time),
+                    ("Phase 3 (Verification)", rq3.avg_phase3_time),
+                ]
+
+                for label, value in phase_times:
+                    if value is not None:
+                        lines.append(f"| {label} | {value:.2f}s |")
 
             if rq3.peak_memory_mb is not None:
                 lines.append(f"| Peak Memory | {rq3.peak_memory_mb:.1f} MB |")
@@ -1483,15 +1673,16 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
                 continue
 
             model_name = model_dir.name
+            results_dir = resolve_model_results_dir(model_dir)
 
             # Apply model filter
             if not should_include_model(model_name, model_filter):
                 continue
 
             # Find C4 results (full PatchScribe)
-            c4_file = model_dir / "c4_merged_results.json"
+            c4_file = results_dir / "c4_merged_results.json"
             if not c4_file.exists():
-                c4_file = model_dir / "c4_results.json"
+                c4_file = results_dir / "c4_results.json"
             if not c4_file.exists():
                 continue
 
@@ -1509,8 +1700,8 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
                 'metrics': {
                     'success_rate': metrics.get('success_rate', 0),
                     'consistency_pass_rate': metrics.get('consistency_pass_rate', 0),
-                    'verification_pass_rate': metrics.get('verification_pass_rate', 0),
-                    'triple_verification_rate': metrics.get('triple_verification_rate', 0),
+                    'consistency_strict_rate': metrics.get('consistency_strict_rate',
+                                                          metrics.get('consistency_pass_rate', 0)),
                     'first_attempt_success_rate': metrics.get('first_attempt_success_rate', 0),
                     'ground_truth_similarity': metrics.get('avg_ast_overall_similarity',
                                                           metrics.get('ground_truth_match_rate', 0)),
@@ -1520,9 +1711,9 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
 
             # Collect other condition results (C1-C3)
             for condition in ['c1', 'c2', 'c3']:
-                cond_file = model_dir / f"{condition}_merged_results.json"
+                cond_file = results_dir / f"{condition}_merged_results.json"
                 if not cond_file.exists():
-                    cond_file = model_dir / f"{condition}_results.json"
+                    cond_file = results_dir / f"{condition}_results.json"
                 if not cond_file.exists():
                     continue
 
@@ -1561,8 +1752,8 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
         "",
         "## C4 (Full PatchScribe) Results",
         "",
-        "| Model | Success Rate | Triple Verification | Consistency | First Attempt | GT Similarity | Cases |",
-        "|-------|--------------|---------------------|-------------|---------------|---------------|-------|",
+        "| Model | Success Rate | Consistency | Strict | First Attempt | GT Similarity | Cases |",
+        "|-------|--------------|-------------|--------|---------------|---------------|-------|",
     ]
 
     # Sort by success rate
@@ -1573,8 +1764,9 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
     for model_name, data in sorted_models:
         m = data['metrics']
         md_lines.append(
-            f"| {model_name} | {m['success_rate']:.1%} | {m['triple_verification_rate']:.1%} | "
-            f"{m['consistency_pass_rate']:.1%} | {m['first_attempt_success_rate']:.1%} | "
+            f"| {model_name} | {m['success_rate']:.1%} | "
+            f"{m['consistency_pass_rate']:.1%} | {m['consistency_strict_rate']:.1%} | "
+            f"{m['first_attempt_success_rate']:.1%} | "
             f"{m['ground_truth_similarity']:.1%} | {m['total_cases']} |"
         )
 
@@ -1609,6 +1801,8 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
     best_model = sorted_models[0]
     best_consistency = max(all_results.items(),
                           key=lambda x: x[1]['metrics']['consistency_pass_rate'])
+    best_strict = max(all_results.items(),
+                      key=lambda x: x[1]['metrics'].get('consistency_strict_rate', 0))
     best_first_attempt = max(all_results.items(),
                             key=lambda x: x[1]['metrics']['first_attempt_success_rate'])
 
@@ -1619,7 +1813,8 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
         "## Key Findings",
         "",
         f"- **Best Overall Model**: {best_model[0]} ({best_model[1]['metrics']['success_rate']:.1%} success rate)",
-        f"- **Highest Consistency**: {best_consistency[0]} ({best_consistency[1]['metrics']['consistency_pass_rate']:.1%})",
+        f"- **Highest Consistency (accepted)**: {best_consistency[0]} ({best_consistency[1]['metrics']['consistency_pass_rate']:.1%})",
+        f"- **Highest Consistency (strict)**: {best_strict[0]} ({best_strict[1]['metrics']['consistency_strict_rate']:.1%})",
         f"- **Best First Attempt**: {best_first_attempt[0]} ({best_first_attempt[1]['metrics']['first_attempt_success_rate']:.1%})",
         "",
     ])
@@ -1657,24 +1852,23 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
         f.write('\n'.join(md_lines))
 
     if verbose:
-        print(f"\n✅ Comparison report saved:")
-        print(f"   JSON: {json_file}")
-        print(f"   Markdown: {md_file}")
-
-        # Console summary
         print("\n" + "=" * 80)
         print("MODEL PERFORMANCE SUMMARY")
-        print("=" * 80)
-        print(f"{'Model':<30} {'Success':<12} {'Triple Ver.':<12} {'Consistency':<12}")
-        print("-" * 80)
+        print("=" * 70)
+        print(f"{'Model':<30} {'Success':<12} {'Consistency':<12} {'1st Attempt':<12}")
+        print("-" * 70)
 
         for model_name, data in sorted_models:
             m = data['metrics']
             print(f"{model_name:<30} {m['success_rate']:>10.1%}  "
-                  f"{m['triple_verification_rate']:>10.1%}  "
-                  f"{m['consistency_pass_rate']:>10.1%}")
+                  f"{m['consistency_pass_rate']:>10.1%}  "
+                  f"{m['first_attempt_success_rate']:>10.1%}")
 
-        print("=" * 80)
+        print("=" * 70)
+
+    print(f"\n✅ Comparison report saved:")
+    print(f"   JSON: {json_file}")
+    print(f"   Markdown: {md_file}")
 
 
 # ==================== UNIFIED SUMMARY ====================
@@ -1727,10 +1921,8 @@ def _compute_aggregate_metrics(all_data: Dict[str, Dict[str, Dict[str, Any]]]) -
             'model_count': len(metrics_list),
             'total_cases': int(total_cases),
             'success_rate': _weighted_average(metrics_list, 'success_rate'),
-            'expected_success_rate': _weighted_average(metrics_list, 'expected_success_rate'),
-            'triple_verification_rate': _weighted_average(metrics_list, 'triple_verification_rate'),
             'consistency_pass_rate': _weighted_average(metrics_list, 'consistency_pass_rate'),
-            'verification_pass_rate': _weighted_average(metrics_list, 'verification_pass_rate'),
+             'consistency_strict_rate': _weighted_average(metrics_list, 'consistency_strict_rate'),
             'first_attempt_success_rate': _weighted_average(metrics_list, 'first_attempt_success_rate'),
             'ground_truth_similarity': _weighted_average(metrics_list, 'ground_truth_similarity'),
             'vulnerability_elimination_rate': _weighted_average(metrics_list, 'vulnerability_elimination_rate'),
@@ -1738,16 +1930,10 @@ def _compute_aggregate_metrics(all_data: Dict[str, Dict[str, Dict[str, Any]]]) -
             'avg_llm_completeness': _mean_metric(metrics_list, 'avg_llm_completeness'),
             'avg_llm_clarity': _mean_metric(metrics_list, 'avg_llm_clarity'),
             'avg_llm_causality': _mean_metric(metrics_list, 'avg_llm_causality'),
+            'syn_eq_rate': _weighted_average(metrics_list, 'syn_eq_rate'),
+            'sem_eq_rate': _weighted_average(metrics_list, 'sem_eq_rate'),
+            'plausible_rate': _weighted_average(metrics_list, 'plausible_rate'),
         }
-
-        for stage in ('symbolic', 'model_check', 'fuzzing'):
-            total_evaluated = sum(float(m.get(f"{stage}_evaluated", 0.0)) for m in metrics_list)
-            total_passes = sum(float(m.get(f"{stage}_passes", 0.0)) for m in metrics_list)
-            aggregated_entry[f"{stage}_evaluated"] = total_evaluated
-            aggregated_entry[f"{stage}_passes"] = total_passes
-            aggregated_entry[f"{stage}_pass_rate"] = (
-                total_passes / total_evaluated if total_evaluated else 0.0
-            )
 
         aggregated[condition] = aggregated_entry
 
@@ -1788,6 +1974,7 @@ def generate_unified_summary(base_dir: Path, output_dir: Path,
 
     for model_dir in sorted(model_dirs):
         model_name = model_dir.name
+        results_dir = resolve_model_results_dir(model_dir)
 
         # Apply model filter
         if not should_include_model(model_name, model_filter):
@@ -1801,9 +1988,9 @@ def generate_unified_summary(base_dir: Path, output_dir: Path,
         # Load results for each condition
         for condition in ['c1', 'c2', 'c3', 'c4']:
             # Try different file patterns
-            result_file = model_dir / f'{condition}_results.json'
+            result_file = results_dir / f'{condition}_results.json'
             if not result_file.exists():
-                result_file = model_dir / f'{condition}_merged_results.json'
+                result_file = results_dir / f'{condition}_merged_results.json'
             if not result_file.exists():
                 continue
 
@@ -1813,14 +2000,16 @@ def generate_unified_summary(base_dir: Path, output_dir: Path,
 
                 metrics = data.get('metrics', {})
                 cases = data.get('cases', [])
+                averages, _, _ = compute_llm_averages(cases)
+                if averages:
+                    metrics.update(averages)
 
                 all_data[model_name][condition] = {
                     'total_cases': int(metrics.get('total_cases', len(cases))),
                     'success_rate': metrics.get('success_rate', 0.0),
-                    'expected_success_rate': metrics.get('expected_success_rate', 0.0),
-                    'triple_verification_rate': metrics.get('triple_verification_rate', 0.0),
                     'consistency_pass_rate': metrics.get('consistency_pass_rate', 0.0),
-                    'verification_pass_rate': metrics.get('verification_pass_rate', 0.0),
+                    'consistency_strict_rate': metrics.get('consistency_strict_rate',
+                                                           metrics.get('consistency_pass_rate', 0.0)),
                     'first_attempt_success_rate': metrics.get('first_attempt_success_rate', 0.0),
                     'ground_truth_similarity': metrics.get('avg_ast_overall_similarity',
                                                           metrics.get('ground_truth_match_rate', 0.0)),
@@ -1829,12 +2018,10 @@ def generate_unified_summary(base_dir: Path, output_dir: Path,
                     'avg_llm_completeness': metrics.get('avg_llm_completeness', 0.0),
                     'avg_llm_clarity': metrics.get('avg_llm_clarity', 0.0),
                     'avg_llm_causality': metrics.get('avg_llm_causality', 0.0),
-                    'symbolic_pass_rate': metrics.get('symbolic_pass_rate', 0.0),
-                    'model_check_pass_rate': metrics.get('model_check_pass_rate', 0.0),
-                    'fuzzing_pass_rate': metrics.get('fuzzing_pass_rate', 0.0),
-                    'symbolic_evaluated': metrics.get('symbolic_evaluated', 0.0),
-                    'model_check_evaluated': metrics.get('model_check_evaluated', 0.0),
-                    'fuzzing_evaluated': metrics.get('fuzzing_evaluated', 0.0),
+                    # LLM Judge success breakdown
+                    'syn_eq_rate': metrics.get('syn_eq_rate', 0.0),
+                    'sem_eq_rate': metrics.get('sem_eq_rate', 0.0),
+                    'plausible_rate': metrics.get('plausible_rate', 0.0),
                 }
 
                 if verbose:
@@ -1876,9 +2063,10 @@ def generate_unified_summary(base_dir: Path, output_dir: Path,
     # Generate console output
     if verbose:
         _print_unified_console(all_data, aggregated_data)
-        print(f"\n✅ Unified summary saved:")
-        print(f"   JSON: {json_file}")
-        print(f"   Markdown: {md_file}")
+
+    print(f"\n✅ Unified summary saved:")
+    print(f"   JSON: {json_file}")
+    print(f"   Markdown: {md_file}")
 
 
 def _generate_unified_markdown(all_data: Dict[str, Dict[str, Dict]],
@@ -1951,8 +2139,8 @@ def _generate_unified_markdown(all_data: Dict[str, Dict[str, Dict]],
         lines.extend([
             f"### {cond_label}",
             "",
-            "| Model | Cases | Success | Expected | Triple Ver. | Consistency | Verification | 1st Attempt | GT Similarity |",
-            "|-------|-------|---------|----------|-------------|-------------|--------------|-------------|---------------|",
+            "| Model | Cases | Success | Consistency | Strict | 1st Attempt | GT Similarity |",
+            "|-------|-------|---------|-------------|--------|-------------|---------------|",
         ])
 
         # Sort by success rate for this condition
@@ -1960,21 +2148,22 @@ def _generate_unified_markdown(all_data: Dict[str, Dict[str, Dict]],
         models_with_cond.sort(key=lambda x: x[1].get('success_rate', 0), reverse=True)
 
         for model_name, metrics in models_with_cond:
+            strict_rate = metrics.get('consistency_strict_rate', metrics['consistency_pass_rate'])
             lines.append(
                 f"| {model_name} | {metrics['total_cases']} | "
-                f"{metrics['success_rate']:.1%} | {metrics['expected_success_rate']:.1%} | "
-                f"{metrics['triple_verification_rate']:.1%} | "
-                f"{metrics['consistency_pass_rate']:.1%} | {metrics['verification_pass_rate']:.1%} | "
+                f"{metrics['success_rate']:.1%} | "
+                f"{metrics['consistency_pass_rate']:.1%} | "
+                f"{strict_rate:.1%} | "
                 f"{metrics['first_attempt_success_rate']:.1%} | "
                 f"{metrics['ground_truth_similarity']:.1%} |"
             )
 
         if aggregated_data.get(condition):
             agg = aggregated_data[condition]
+            strict_rate = agg.get('consistency_strict_rate', agg.get('consistency_pass_rate', 0.0))
             lines.append(
-                f"| **All Models** | {agg['total_cases']} | {agg['success_rate']:.1%} | {agg['expected_success_rate']:.1%} | "
-                f"{agg['triple_verification_rate']:.1%} | {agg['consistency_pass_rate']:.1%} | "
-                f"{agg['verification_pass_rate']:.1%} | {agg['first_attempt_success_rate']:.1%} | "
+                f"| **All Models** | {agg['total_cases']} | {agg['success_rate']:.1%} | "
+                f"{agg['consistency_pass_rate']:.1%} | {strict_rate:.1%} | {agg['first_attempt_success_rate']:.1%} | "
                 f"{agg['ground_truth_similarity']:.1%} |"
             )
 
@@ -1986,8 +2175,8 @@ def _generate_unified_markdown(all_data: Dict[str, Dict[str, Dict]],
             "",
             "## Aggregate Metrics Across Models",
             "",
-            "| Condition | Models | Total Cases | Success | Expected | Triple Ver. | Consistency | Verification | 1st Attempt | GT Similarity | Vuln Elimin. |",
-            "|-----------|--------|-------------|---------|----------|-------------|-------------|--------------|-------------|---------------|--------------|",
+            "| Condition | Models | Total Cases | Success | Consistency | Strict | 1st Attempt | GT Similarity | Vuln Elimin. |",
+            "|-----------|--------|-------------|---------|-------------|--------|-------------|---------------|--------------|",
         ])
 
         cond_labels = {
@@ -2001,11 +2190,11 @@ def _generate_unified_markdown(all_data: Dict[str, Dict[str, Dict]],
             if condition not in aggregated_data:
                 continue
             agg = aggregated_data[condition]
+            strict_rate = agg.get('consistency_strict_rate', agg['consistency_pass_rate'])
             lines.append(
                 f"| {cond_labels.get(condition, condition.upper())} | {agg['model_count']} | "
-                f"{agg['total_cases']} | {agg['success_rate']:.1%} | {agg['expected_success_rate']:.1%} | "
-                f"{agg['triple_verification_rate']:.1%} | {agg['consistency_pass_rate']:.1%} | "
-                f"{agg['verification_pass_rate']:.1%} | {agg['first_attempt_success_rate']:.1%} | "
+                f"{agg['total_cases']} | {agg['success_rate']:.1%} | "
+                f"{agg['consistency_pass_rate']:.1%} | {strict_rate:.1%} | {agg['first_attempt_success_rate']:.1%} | "
                 f"{agg['ground_truth_similarity']:.1%} | {agg['vulnerability_elimination_rate']:.1%} |"
             )
 
@@ -2027,50 +2216,6 @@ def _generate_unified_markdown(all_data: Dict[str, Dict[str, Dict]],
                 f"| {cond_labels.get(condition, condition.upper())} | "
                 f"{agg['avg_llm_accuracy']:.2f} | {agg['avg_llm_completeness']:.2f} | "
                 f"{agg['avg_llm_clarity']:.2f} | {agg['avg_llm_causality']:.2f} |"
-            )
-
-        lines.append("")
-
-    # Verification stage performance across models and conditions
-    lines.extend([
-        "---",
-        "",
-        "## Verification Stage Pass Rates",
-        "",
-    ])
-
-    condition_stage_labels = {
-        'c1': 'C1 (Baseline)',
-        'c2': 'C2 (Vague Hints)',
-        'c3': 'C3 (Pre-hoc)',
-        'c4': 'C4 (Full PatchScribe)'
-    }
-
-    for condition in ['c1', 'c2', 'c3', 'c4']:
-        models_with_cond = [(m, d[condition]) for m, d in all_data.items() if condition in d]
-        if not models_with_cond:
-            continue
-
-        lines.extend([
-            f"### {condition_stage_labels.get(condition, condition.upper())}",
-            "",
-            "| Model | Symbolic | Model Check | Fuzzing |",
-            "|-------|----------|-------------|---------|",
-        ])
-
-        models_with_cond.sort(key=lambda x: x[1].get('symbolic_pass_rate', 0), reverse=True)
-
-        for model_name, metrics in models_with_cond:
-            lines.append(
-                f"| {model_name} | {metrics.get('symbolic_pass_rate', 0.0):.1%} | "
-                f"{metrics.get('model_check_pass_rate', 0.0):.1%} | {metrics.get('fuzzing_pass_rate', 0.0):.1%} |"
-            )
-
-        if aggregated_data.get(condition):
-            agg = aggregated_data[condition]
-            lines.append(
-                f"| **All Models** | {agg.get('symbolic_pass_rate', 0.0):.1%} | "
-                f"{agg.get('model_check_pass_rate', 0.0):.1%} | {agg.get('fuzzing_pass_rate', 0.0):.1%} |"
             )
 
         lines.append("")
@@ -2136,7 +2281,140 @@ def _generate_unified_markdown(all_data: Dict[str, Dict[str, Dict]],
 
         lines.append("")
 
+    # Calculate summary statistics: model averages and metric averages by condition
+    # Collect all data first
+    condition_data = {}
+    for condition in ['c1', 'c2', 'c3', 'c4']:
+        condition_data[condition] = {}
+        for model_name, condition_map in all_data.items():
+            metrics = condition_map.get(condition)
+            if not metrics:
+                continue
+            
+            acc = metrics.get('avg_llm_accuracy')
+            comp = metrics.get('avg_llm_completeness')
+            clar = metrics.get('avg_llm_clarity')
+            caus = metrics.get('avg_llm_causality')
+            
+            if acc is not None or comp is not None or clar is not None or caus is not None:
+                condition_data[condition][model_name] = {
+                    'accuracy': acc if acc is not None else 0,
+                    'completeness': comp if comp is not None else 0,
+                    'clarity': clar if clar is not None else 0,
+                    'causality': caus if caus is not None else 0,
+                }
+    
+    # Calculate model averages by condition
+    model_averages = {}
+    for model_name in all_data.keys():
+        model_averages[model_name] = {}
+        for condition in ['c1', 'c2', 'c3', 'c4']:
+            if model_name in condition_data[condition]:
+                scores = condition_data[condition][model_name]
+                values = [scores[k] for k in ['accuracy', 'completeness', 'clarity', 'causality'] if scores[k] > 0]
+                if values:
+                    model_averages[model_name][condition] = statistics.mean(values)
+                else:
+                    model_averages[model_name][condition] = 0
+    
+    # Calculate metric averages by condition
+    metric_averages = {
+        'accuracy': {},
+        'completeness': {},
+        'clarity': {},
+        'causality': {}
+    }
+    for condition in ['c1', 'c2', 'c3', 'c4']:
+        for metric in ['accuracy', 'completeness', 'clarity', 'causality']:
+            values = []
+            for model_name in condition_data[condition]:
+                val = condition_data[condition][model_name][metric]
+                if val > 0:
+                    values.append(val)
+            if values:
+                metric_averages[metric][condition] = statistics.mean(values)
+            else:
+                metric_averages[metric][condition] = 0
+    
+    # Add summary statistics section
     lines.extend([
+        "---",
+        "",
+        "## LLM Judge Quality Summary Statistics",
+        "",
+        "### Model Averages by Condition",
+        "",
+        "| Model | C1 Average | C2 Average | C3 Average | C4 Average |",
+        "|-------|------------|------------|------------|------------|",
+    ])
+    
+    # Add model averages rows
+    for model_name in sorted(model_averages.keys()):
+        c1_avg = model_averages[model_name].get('c1', 0)
+        c2_avg = model_averages[model_name].get('c2', 0)
+        c3_avg = model_averages[model_name].get('c3', 0)
+        c4_avg = model_averages[model_name].get('c4', 0)
+        lines.append(
+            f"| {model_name} | {c1_avg:.2f} | {c2_avg:.2f} | {c3_avg:.2f} | {c4_avg:.2f} |"
+        )
+    
+    # Calculate overall average for all models
+    all_models_c1 = [v.get('c1', 0) for v in model_averages.values() if v.get('c1', 0) > 0]
+    all_models_c2 = [v.get('c2', 0) for v in model_averages.values() if v.get('c2', 0) > 0]
+    all_models_c3 = [v.get('c3', 0) for v in model_averages.values() if v.get('c3', 0) > 0]
+    all_models_c4 = [v.get('c4', 0) for v in model_averages.values() if v.get('c4', 0) > 0]
+    
+    overall_c1 = statistics.mean(all_models_c1) if all_models_c1 else 0
+    overall_c2 = statistics.mean(all_models_c2) if all_models_c2 else 0
+    overall_c3 = statistics.mean(all_models_c3) if all_models_c3 else 0
+    overall_c4 = statistics.mean(all_models_c4) if all_models_c4 else 0
+    
+    lines.append(
+        f"| **All Models Average** | {overall_c1:.2f} | {overall_c2:.2f} | {overall_c3:.2f} | {overall_c4:.2f} |"
+    )
+    
+    lines.extend([
+        "",
+        "### Metric Averages by Condition",
+        "",
+        "| Metric | C1 Average | C2 Average | C3 Average | C4 Average |",
+        "|--------|------------|------------|------------|------------|",
+    ])
+    
+    # Add metric averages rows
+    metric_labels = {
+        'accuracy': 'Accuracy',
+        'completeness': 'Completeness',
+        'clarity': 'Clarity',
+        'causality': 'Causality'
+    }
+    
+    for metric in ['accuracy', 'completeness', 'clarity', 'causality']:
+        c1_avg = metric_averages[metric].get('c1', 0)
+        c2_avg = metric_averages[metric].get('c2', 0)
+        c3_avg = metric_averages[metric].get('c3', 0)
+        c4_avg = metric_averages[metric].get('c4', 0)
+        lines.append(
+            f"| {metric_labels[metric]} | {c1_avg:.2f} | {c2_avg:.2f} | {c3_avg:.2f} | {c4_avg:.2f} |"
+        )
+    
+    # Calculate overall average for all metrics
+    all_metrics_c1 = [metric_averages[m].get('c1', 0) for m in ['accuracy', 'completeness', 'clarity', 'causality'] if metric_averages[m].get('c1', 0) > 0]
+    all_metrics_c2 = [metric_averages[m].get('c2', 0) for m in ['accuracy', 'completeness', 'clarity', 'causality'] if metric_averages[m].get('c2', 0) > 0]
+    all_metrics_c3 = [metric_averages[m].get('c3', 0) for m in ['accuracy', 'completeness', 'clarity', 'causality'] if metric_averages[m].get('c3', 0) > 0]
+    all_metrics_c4 = [metric_averages[m].get('c4', 0) for m in ['accuracy', 'completeness', 'clarity', 'causality'] if metric_averages[m].get('c4', 0) > 0]
+    
+    overall_metrics_c1 = statistics.mean(all_metrics_c1) if all_metrics_c1 else 0
+    overall_metrics_c2 = statistics.mean(all_metrics_c2) if all_metrics_c2 else 0
+    overall_metrics_c3 = statistics.mean(all_metrics_c3) if all_metrics_c3 else 0
+    overall_metrics_c4 = statistics.mean(all_metrics_c4) if all_metrics_c4 else 0
+    
+    lines.append(
+        f"| **All Metrics Average** | {overall_metrics_c1:.2f} | {overall_metrics_c2:.2f} | {overall_metrics_c3:.2f} | {overall_metrics_c4:.2f} |"
+    )
+    
+    lines.extend([
+        "",
         "---",
         "",
         "## LLM Judge Quality Scores by Model (C4)",
@@ -2168,6 +2446,73 @@ def _generate_unified_markdown(all_data: Dict[str, Dict[str, Dict]],
 
     if not c4_llm_scores:
         lines.append("| *No LLM judge scores available* | - | - | - | - | - |")
+
+    # LLM Judge Success Breakdown section
+    lines.extend([
+        "",
+        "---",
+        "",
+        "## LLM Judge Success Breakdown",
+        "",
+        "Shows how patches were classified by the LLM judge (SynEq/SemEq/Plausible).",
+        "",
+    ])
+
+    condition_labels = {
+        'c1': 'C1 (Baseline)',
+        'c2': 'C2 (Vague Hints)',
+        'c3': 'C3 (Pre-hoc)',
+        'c4': 'C4 (Full PatchScribe)'
+    }
+
+    for condition in ['c1', 'c2', 'c3', 'c4']:
+        models_with_cond = [(m, d[condition]) for m, d in all_data.items() if condition in d]
+        if not models_with_cond:
+            continue
+
+        # Check if any model has judge data
+        has_judge_data = any(
+            m.get('syn_eq_rate', 0) + m.get('sem_eq_rate', 0) + m.get('plausible_rate', 0) > 0
+            for _, m in models_with_cond
+        )
+        if not has_judge_data:
+            continue
+
+        lines.extend([
+            f"### {condition_labels.get(condition, condition.upper())}",
+            "",
+            "| Model | SynEq | SemEq | Plausible | Failed |",
+            "|-------|-------|-------|-----------|--------|",
+        ])
+
+        models_with_cond.sort(key=lambda x: (
+            x[1].get('syn_eq_rate', 0) +
+            x[1].get('sem_eq_rate', 0) +
+            x[1].get('plausible_rate', 0)
+        ), reverse=True)
+
+        for model_name, metrics in models_with_cond:
+            syn_eq = metrics.get('syn_eq_rate', 0.0)
+            sem_eq = metrics.get('sem_eq_rate', 0.0)
+            plausible = metrics.get('plausible_rate', 0.0)
+            failed = 1.0 - (syn_eq + sem_eq + plausible)
+
+            lines.append(
+                f"| {model_name} | {syn_eq:.1%} | {sem_eq:.1%} | {plausible:.1%} | {failed:.1%} |"
+            )
+
+        if aggregated_data.get(condition):
+            agg = aggregated_data[condition]
+            syn_eq = agg.get('syn_eq_rate', 0.0)
+            sem_eq = agg.get('sem_eq_rate', 0.0)
+            plausible = agg.get('plausible_rate', 0.0)
+            failed = 1.0 - (syn_eq + sem_eq + plausible)
+
+            lines.append(
+                f"| **All Models** | {syn_eq:.1%} | {sem_eq:.1%} | {plausible:.1%} | {failed:.1%} |"
+            )
+
+        lines.append("")
 
     lines.extend([
         "",
@@ -2271,35 +2616,84 @@ def _print_unified_console(all_data: Dict[str, Dict[str, Dict]],
         if not models_with_cond:
             continue
 
-        print(f"\n{'-' * 100}")
+        print(f"\n{'-' * 85}")
         print(f"{cond_label}")
         print(f"{'-' * 100}")
-        print(f"{'Model':<30} {'Cases':<8} {'Success':<10} {'Triple Ver':<12} {'Consistency':<12} "
-              f"{'Verification':<13} {'1st Attempt':<12}")
+        print(f"{'Model':<30} {'Cases':<8} {'Success':<10} {'Consistency':<12} {'Strict':<10} {'1st Attempt':<12}")
         print(f"{'-' * 100}")
 
         models_with_cond.sort(key=lambda x: x[1].get('success_rate', 0), reverse=True)
 
         for model_name, metrics in models_with_cond:
+            strict_rate = metrics.get('consistency_strict_rate', metrics['consistency_pass_rate'])
             print(f"{model_name:<30} {metrics['total_cases']:<8} "
                   f"{metrics['success_rate']:>8.1%}  "
-                  f"{metrics['triple_verification_rate']:>10.1%}  "
                   f"{metrics['consistency_pass_rate']:>10.1%}  "
-                  f"{metrics['verification_pass_rate']:>11.1%}  "
+                  f"{strict_rate:>8.1%}  "
                   f"{metrics['first_attempt_success_rate']:>10.1%}")
 
         if aggregated_data.get(condition):
             agg = aggregated_data[condition]
+            strict_rate = agg.get('consistency_strict_rate', agg['consistency_pass_rate'])
             print(f"{'All Models':<30} {agg['total_cases']:<8} "
-                  f"{agg['success_rate']:>8.1%}  {agg['triple_verification_rate']:>10.1%}  "
-                  f"{agg['consistency_pass_rate']:>10.1%}  {agg['verification_pass_rate']:>11.1%}  "
+                  f"{agg['success_rate']:>8.1%}  "
+                  f"{agg['consistency_pass_rate']:>10.1%}  "
+                  f"{strict_rate:>8.1%}  "
                   f"{agg['first_attempt_success_rate']:>10.1%}")
 
-            print(
-                f"{'Stage pass rates':<30} {'':<8} "
-                f"{agg.get('symbolic_pass_rate', 0.0):>8.1%}  {agg.get('model_check_pass_rate', 0.0):>10.1%}  "
-                f"{agg.get('fuzzing_pass_rate', 0.0):>10.1%}"
-            )
+    # LLM Judge Success Breakdown
+    print("\n" + "=" * 100)
+    print("LLM JUDGE SUCCESS BREAKDOWN")
+    print("=" * 100)
+
+    for condition in ['c1', 'c2', 'c3', 'c4']:
+        cond_label = {
+            'c1': 'C1 (Baseline)',
+            'c2': 'C2 (Vague Hints)',
+            'c3': 'C3 (Pre-hoc)',
+            'c4': 'C4 (Full PatchScribe)'
+        }.get(condition, condition.upper())
+
+        models_with_cond = [(m, d[condition]) for m, d in all_data.items() if condition in d]
+        if not models_with_cond:
+            continue
+
+        # Check if any model has judge data
+        has_judge_data = any(
+            m.get('syn_eq_rate', 0) + m.get('sem_eq_rate', 0) + m.get('plausible_rate', 0) > 0
+            for _, m in models_with_cond
+        )
+        if not has_judge_data:
+            continue
+
+        print(f"\n{'-' * 100}")
+        print(f"{cond_label}")
+        print(f"{'-' * 100}")
+        print(f"{'Model':<30} {'SynEq':<10} {'SemEq':<10} {'Plausible':<12} {'Failed':<10}")
+        print(f"{'-' * 100}")
+
+        models_with_cond.sort(key=lambda x: (
+            x[1].get('syn_eq_rate', 0) +
+            x[1].get('sem_eq_rate', 0) +
+            x[1].get('plausible_rate', 0)
+        ), reverse=True)
+
+        for model_name, metrics in models_with_cond:
+            syn_eq = metrics.get('syn_eq_rate', 0.0)
+            sem_eq = metrics.get('sem_eq_rate', 0.0)
+            plausible = metrics.get('plausible_rate', 0.0)
+            failed = 1.0 - (syn_eq + sem_eq + plausible)
+
+            print(f"{model_name:<30} {syn_eq:>8.1%}  {sem_eq:>8.1%}  {plausible:>10.1%}  {failed:>8.1%}")
+
+        if aggregated_data.get(condition):
+            agg = aggregated_data[condition]
+            syn_eq = agg.get('syn_eq_rate', 0.0)
+            sem_eq = agg.get('sem_eq_rate', 0.0)
+            plausible = agg.get('plausible_rate', 0.0)
+            failed = 1.0 - (syn_eq + sem_eq + plausible)
+
+            print(f"{'All Models':<30} {syn_eq:>8.1%}  {sem_eq:>8.1%}  {plausible:>10.1%}  {failed:>8.1%}")
 
     print("\n" + "=" * 100)
 
@@ -2374,7 +2768,13 @@ Note:
     parser.add_argument(
         '-q', '--quiet',
         action='store_true',
-        help='Minimal output mode'
+        help='(Deprecated) Output is minimal by default'
+    )
+
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Show detailed console output (RQ breakdowns, tables, etc.)'
     )
 
     parser.add_argument(
@@ -2414,8 +2814,33 @@ Note:
 
     args = parser.parse_args()
 
-    verbose = not args.quiet
-    model_filter = args.models
+    if args.verbose and args.quiet:
+        parser.error("Cannot use --quiet and --verbose together")
+
+    verbose = args.verbose
+    # Handle comma-separated model names as well as space-separated
+    model_filter = None
+    if args.models:
+        model_filter = []
+        for model in args.models:
+            # Split by comma in case user provided comma-separated list
+            model_filter.extend([m.strip() for m in model.split(',') if m.strip()])
+        if not model_filter:
+            model_filter = None
+
+    def _print_analysis_saved(analyzer: RQAnalyzer) -> None:
+        """Print minimal completion info when running in quiet mode."""
+        if verbose:
+            return
+        json_path = analyzer.last_output_path
+        md_path = analyzer.last_markdown_path
+        if not json_path:
+            return
+        condition_label = analyzer.condition.upper() if analyzer.condition else 'N/A'
+        print(f"✅ {analyzer.model} ({condition_label}) analysis saved")
+        print(f"   JSON: {json_path}")
+        if md_path:
+            print(f"   Markdown: {md_path}")
 
     if args.judge_only and not args.run_judge:
         args.run_judge = True
@@ -2455,7 +2880,8 @@ Note:
                                                   verbose, model_filter)
 
             # Auto-analyze merged results
-            print_header("Analyzing Merged Results")
+            if verbose:
+                print_header("Analyzing Merged Results")
 
             for model_dir in merged_dir.iterdir():
                 if not model_dir.is_dir() or model_dir.name.startswith('.'):
@@ -2464,10 +2890,12 @@ Note:
                 if not should_include_model(model_dir.name, model_filter):
                     continue
 
-                c4_file = model_dir / "c4_merged_results.json"
+                results_dir = resolve_model_results_dir(model_dir)
+                c4_file = results_dir / "c4_merged_results.json"
                 if c4_file.exists():
                     analyzer = RQAnalyzer(c4_file)
                     analyzer.generate_comprehensive_report(verbose=verbose)
+                    _print_analysis_saved(analyzer)
 
             # Generate comparison report
             comparison_dir = args.output.parent / "comparison" if args.output else Path('results/comparison')
@@ -2504,6 +2932,7 @@ Note:
 
                     analyzer = RQAnalyzer(input_path)
                     analyzer.generate_comprehensive_report(verbose=verbose)
+                    _print_analysis_saved(analyzer)
                     results_analyzed += 1
 
                 # Directory - find result files
@@ -2513,9 +2942,38 @@ Note:
                     else:
                         conditions = ['c4']
 
+                    # Find all model directories
+                    model_dirs = [d for d in input_path.iterdir()
+                                 if d.is_dir() and not d.name.startswith('.')
+                                 and d.name not in ('comparison', 'unified')]
+
+                    if not model_dirs:
+                        if verbose:
+                            print(f"⚠️  No model directories found in {input_path}")
+                        continue
+
+                    models_analyzed = set()
                     result_files: List[Path] = []
-                    for condition in conditions:
-                        result_files.extend(input_path.glob(f"**/{condition}_*results.json"))
+
+                    # For each model, use only the most recent timestamp directory
+                    for model_dir in model_dirs:
+                        model_name = model_dir.name
+
+                        if not should_include_model(model_name, model_filter):
+                            if verbose and model_filter:
+                                print(f"⏭️  Skipping {model_name} (filtered out)")
+                            continue
+
+                        # Resolve to most recent timestamp directory
+                        results_dir = resolve_model_results_dir(model_dir)
+
+                        # Find result files for requested conditions
+                        for condition in conditions:
+                            result_file = results_dir / f'{condition}_results.json'
+                            if not result_file.exists():
+                                result_file = results_dir / f'{condition}_merged_results.json'
+                            if result_file.exists():
+                                result_files.append(result_file)
 
                     if not result_files:
                         if verbose:
@@ -2523,15 +2981,13 @@ Note:
                             print(f"⚠️  No {cond_str} result files found in {input_path}")
                         continue
 
-                    models_analyzed = set()
-
                     for result_file in sorted(result_files):
-                        model_name = result_file.parent.name
-
-                        if not should_include_model(model_name, model_filter):
-                            if verbose and model_filter and model_name not in models_analyzed:
-                                print(f"⏭️  Skipping {model_name} (filtered out)")
-                            continue
+                        # Get model name - skip timestamp directories
+                        parent_dir = result_file.parent
+                        if looks_like_timestamp(parent_dir.name):
+                            model_name = parent_dir.parent.name
+                        else:
+                            model_name = parent_dir.name
 
                         condition = result_file.stem.split('_')[0]
 
@@ -2550,6 +3006,7 @@ Note:
 
                         analyzer = RQAnalyzer(result_file)
                         analyzer.generate_comprehensive_report(verbose=verbose)
+                        _print_analysis_saved(analyzer)
                         results_analyzed += 1
                         models_analyzed.add(model_name)
 
@@ -2565,6 +3022,8 @@ Note:
                         print(f"\n✅ Updated {judge_updates} file(s) with judge scores\n")
                     else:
                         print("\n⚠️  LLM judge did not update any files\n")
+                else:
+                    print(f"✅ LLM judge finished - updated {judge_updates} file(s)")
                 sys.exit(0)
 
             if results_analyzed == 0:
@@ -2581,6 +3040,10 @@ Note:
                     print("")
                 print_header("Analysis Complete")
                 print(f"\n✅ Analyzed {results_analyzed} result file(s)\n")
+            else:
+                if args.run_judge:
+                    print(f"✅ Judge evaluation complete - updated {judge_updates} file(s)")
+                print(f"✅ Analyzed {results_analyzed} result file(s)")
 
     except KeyboardInterrupt:
         print("\n\n⚠️  Analysis interrupted by user\n")

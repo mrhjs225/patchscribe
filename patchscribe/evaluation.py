@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from functools import lru_cache
 import multiprocessing as mp
 from typing import Dict, Iterable, List, Optional
 
@@ -15,6 +16,7 @@ except ImportError:
 
 from .pipeline import PatchScribePipeline, PipelineArtifacts
 from .llm import LLMConfig, LLMClient
+from .success_judge import PatchSuccessJudge
 
 
 @dataclass
@@ -34,6 +36,7 @@ class CaseEvaluation:
     performance: Dict[str, object] | None = None
     patch_quality: Dict[str, object] | None = None
     ast_similarity: Dict[str, object] | None = None  # AST-based ground truth similarity
+    success_judgment: Dict[str, object] | None = None
 
     def as_dict(self) -> Dict[str, object]:
         result = {
@@ -57,6 +60,8 @@ class CaseEvaluation:
             result["patch_quality"] = self.patch_quality
         if self.ast_similarity is not None:
             result["ast_similarity"] = self.ast_similarity
+        if self.success_judgment is not None:
+            result["success_judgment"] = self.success_judgment
         return result
 
 
@@ -136,8 +141,12 @@ class Evaluator:
         first_attempt_successes = 0
         first_attempt_count = 0
         consistency_passes = 0
+        consistency_accepts = 0
         consistency_count = 0
         triple_verification_passes = 0
+        syn_eq_count = 0
+        sem_eq_count = 0
+        plausible_count = 0
 
         for evaluation in evaluations:
             if evaluation.actual_success:
@@ -159,9 +168,14 @@ class Evaluator:
             if evaluation.consistency:
                 consistency_count += 1
                 consistency_pass = evaluation.consistency.get("overall", False)
+                accepted = evaluation.consistency.get("accepted")
+                if accepted is None:
+                    accepted = consistency_pass
                 if consistency_pass:
                     consistency_passes += 1
-                # Triple verification
+                if accepted:
+                    consistency_accepts += 1
+                # Triple verification still requires strict pass
                 if evaluation.actual_success and consistency_pass:
                     triple_verification_passes += 1
 
@@ -200,6 +214,14 @@ class Evaluator:
                 if have_patch_score:
                     patch_quality_counts += 1
 
+            success_meta = evaluation.success_judgment or {}
+            if success_meta.get("syn_eq"):
+                syn_eq_count += 1
+            elif success_meta.get("sem_eq"):
+                sem_eq_count += 1
+            elif success_meta.get("plausible"):
+                plausible_count += 1
+
         # Calculate AST similarity averages
         ast_similarity_count = 0
         ast_overall_total = 0.0
@@ -223,8 +245,12 @@ class Evaluator:
             "ground_truth_match_rate": ground_truth_matches / ground_truth_total if ground_truth_total else 0.0,
             "avg_explanation_checklist": checklist_total / checklist_count if checklist_count else 0.0,
             "first_attempt_success_rate": first_attempt_successes / first_attempt_count if first_attempt_count else 0.0,
-            "consistency_pass_rate": consistency_passes / consistency_count if consistency_count else 0.0,
+            "consistency_pass_rate": consistency_accepts / consistency_count if consistency_count else 0.0,
+            "consistency_strict_rate": consistency_passes / consistency_count if consistency_count else 0.0,
             "triple_verification_pass_rate": triple_verification_passes / total if total else 0.0,
+            "syn_eq_rate": syn_eq_count / total if total else 0.0,
+            "sem_eq_rate": sem_eq_count / total if total else 0.0,
+            "plausible_rate": plausible_count / total if total else 0.0,
         }
 
         # Add AST similarity metrics if available
@@ -478,6 +504,12 @@ def _normalize_code(code: str | None) -> str:
     return "\n".join(line.rstrip() for line in code.strip().splitlines())
 
 
+@lru_cache(maxsize=1)
+def _get_patch_success_judge() -> PatchSuccessJudge:
+    """Instantiate a single PatchSuccessJudge per process."""
+    return PatchSuccessJudge()
+
+
 def _evaluate_case_wrapper(
     case: Dict[str, object],
     case_number: int,
@@ -489,15 +521,23 @@ def _evaluate_case_wrapper(
     모듈 레벨 함수가 필요함.
     """
     artifacts = pipeline.run(case)
-    actual_success = artifacts.verification.overall
-    if (
-        not actual_success
-        and artifacts.consistency is not None
-        and artifacts.consistency.overall
-    ):
-        effect_flag = artifacts.effect.get("vulnerability_removed") if isinstance(artifacts.effect, dict) else None
-        if effect_flag:
-            actual_success = True
+    judge = _get_patch_success_judge()
+    generated_patch = artifacts.patch.patched_code or ""
+    explanation_bundle = artifacts.explanations
+    description_hint = (
+        explanation_bundle.natural_llm
+        or explanation_bundle.natural_template
+        or explanation_bundle.formal_summary
+        or None
+    )
+    success_verdict = judge.evaluate(
+        original_code=case.get("source", ""),
+        patched_code=generated_patch,
+        ground_truth=case.get("ground_truth"),
+        vulnerability_signature=case.get("signature"),
+        description=description_hint,
+    )
+    actual_success = success_verdict.is_success
     expected = case.get("expected_success", False)
     case_identifier = (
         case.get("id")
@@ -579,4 +619,5 @@ def _evaluate_case_wrapper(
         performance=artifacts.performance.as_dict() if artifacts.performance else None,
         patch_quality=artifacts.patch_quality,
         ast_similarity=ast_similarity_info,
+        success_judgment=success_verdict.as_dict(),
     )

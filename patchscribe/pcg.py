@@ -57,6 +57,54 @@ class ProgramCausalGraph:
     def successors(self, node_id: str) -> List[str]:
         return list(self.nodes[node_id].metadata.get("causal_children", []))
 
+    def to_dict(self) -> Dict[str, object]:
+        """Serialize the graph to a plain-Python structure."""
+        return {
+            "nodes": [
+                {
+                    "node_id": node.node_id,
+                    "node_type": node.node_type,
+                    "description": node.description,
+                    "location": node.location,
+                    "metadata": node.metadata,
+                }
+                for node in self.nodes.values()
+            ],
+            "edges": [
+                {
+                    "source": edge.source,
+                    "target": edge.target,
+                    "edge_type": edge.edge_type,
+                    "rationale": edge.rationale,
+                }
+                for edge in self.edges
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "ProgramCausalGraph":
+        """Reconstruct a graph from to_dict output."""
+        graph = cls()
+        for node_info in data.get("nodes", []):
+            node = PCGNode(
+                node_id=node_info.get("node_id") or node_info.get("id"),
+                node_type=node_info.get("node_type") or node_info.get("type"),
+                description=node_info.get("description", ""),
+                location=node_info.get("location"),
+                metadata=node_info.get("metadata") or {},
+            )
+            graph.add_node(node)
+        for edge_info in data.get("edges", []):
+            edge = PCGEdge(
+                source=edge_info.get("source"),
+                target=edge_info.get("target"),
+                edge_type=edge_info.get("edge_type", "data"),
+                rationale=edge_info.get("rationale", ""),
+            )
+            if edge.source in graph.nodes and edge.target in graph.nodes:
+                graph.add_edge(edge)
+        return graph
+
 
 NodeIdSequence = Dict[str, int]
 

@@ -50,6 +50,14 @@ python3 scripts/run_full_evaluation.py zeroday \
     --output results/evaluation_full
 ```
 
+> 💡 LLM 호출 전에 Stage-1 캐시만 미리 만들어 두면 이후 반복 실험 속도가 빨라집니다.
+
+```bash
+# Stage-1 캐시 사전 생성 (LLM 호출 없음)
+python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
+    --precompute-stage1
+```
+
 #### Step 2: RQ2 - Incomplete Patches 생성 (2분)
 ```bash
 # 각 취약점당 2-3개의 불완전 패치 생성

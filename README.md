@@ -2,7 +2,7 @@
 
 **Theory-Guided Vulnerability Repair Framework with Dual Causal Explanations**
 
-PatchScribe는 형식적 인과 이론(formal causality theory)을 활용하여 취약점을 자동으로 수정하고, 이중 인과 설명(E_bug ↔ E_patch)을 통해 검증하는 프레임워크입니다.
+PatchScribe는 형식적 인과 이론(formal causality theory)을 활용하여 취약점을 자동으로 수정하고, 이중 인과 설명(E_bug ↔ E_patch)을 생성하는 프레임워크입니다. LLM 기반 평가를 통해 패치 품질과 설명 품질을 측정합니다.
 
 ---
 
@@ -47,6 +47,14 @@ python3 scripts/run_experiment.py --dataset zeroday --limit 10
 
 # 분산 실험 (Server 0, 4대 서버 중)
 python3 scripts/run_experiment.py --distributed 0 4 20 --dataset zeroday
+
+# Stage-1 캐시만 미리 생성 (LLM 호출 전 준비)
+python3 scripts/run_experiment.py --dataset zeroday --limit 10 --precompute-stage1
+
+# Stage-1 캐시 경로 변경 / 강제 재계산
+python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
+    --stage1-cache-dir results/cache/custom_stage1 \
+    --refresh-stage1-cache
 ```
 
 **주요 기능**:
@@ -114,35 +122,45 @@ python3 scripts/analyze.py --merge results/server*
 
 ## 📊 Research Questions
 
-### RQ1: Theory-Guided Generation Effectiveness
-**질문**: 사전 형식 명세(E_bug)가 더 정확한 패치를 생성하는가?
+### RQ1: Theory-Guided Patch Generation
+**질문**: E_bug 사전 명세가 더 정확하고 안전한 패치를 생성하는가?
+
+**측정 지표** (LLM Judge):
+- Patch Correctness (패치가 취약점을 올바르게 수정했는가?)
+- Patch Completeness (모든 취약점 경로를 제거했는가?)
+- Patch Safety (부작용이 없는가?)
+- Semantic Similarity to Ground Truth (실제 패치와의 유사도)
+- First Attempt Success (첫 시도 성공률)
+
+### RQ2: Explanation Quality and Alignment
+**질문**: E_bug/E_patch 형식 명세와 자연어 설명이 유용하고 일치하는가?
 
 **측정 지표**:
-- Triple verification rate (삼중 검증 통과율)
-- Ground truth similarity (실제 패치 유사도)
-- First attempt success rate (첫 시도 성공률)
+- **Formal Spec Completeness** (자동): E_bug/E_patch 완전성
+- **Natural Explanation Quality** (LLM Judge): Accuracy, Clarity, Causality
+- **Consistency Check Pass Rate** (자동): E_bug ↔ E_patch 논리적 일관성
+- **Explanation-Patch Alignment** (LLM Judge): 설명과 패치의 일치도
 
-### RQ2: Dual Verification Effectiveness
-**질문**: 이중 설명(E_bug ↔ E_patch) + 일관성 검증이 불완전 패치를 탐지하는가?
+### RQ3: Ablation Study
+**질문**: E_bug와 Consistency Check의 기여도는?
 
-**측정 지표**:
-- Incomplete patches caught (불완전 패치 탐지 수)
-- Consistency violation breakdown (일관성 위반 유형)
+**조건**:
+- **C1** (Baseline): E_bug ✗, Consistency ✗
+- **C2** (Vague Hints): 비형식 힌트, Consistency ✗
+- **C3** (Pre-hoc): E_bug ✓, Consistency ✗
+- **C4** (Full): E_bug ✓, Consistency ✓
 
-### RQ3: Scalability and Performance
-**질문**: 3단계 워크플로우의 시간 오버헤드는?
+**측정**: C1→C4 간 Patch Correctness 및 Explanation Quality 변화
 
-**측정 지표**:
-- Phase 1/2/3 time (단계별 시간)
-- Total time (목표: <3분)
-- Peak memory usage
-
-### RQ4: Explanation Quality
-**질문**: 이중 설명이 개발자에게 유용한 인사이트를 제공하는가?
+### RQ4: Efficiency Analysis
+**질문**: 형식화 단계의 시간/메모리 오버헤드는 수용 가능한가?
 
 **측정 지표**:
-- Checklist coverage (자동)
-- Expert quality scores (GPT 기반)
+- Phase 1 Time (Formalization: PCG/SCM/E_bug)
+- Phase 2 Time (Generation: Patch + E_patch + Explanation)
+- Total Time (목표: 실용적 시간 내)
+- Memory Usage
+- Scalability (LOC에 따른 시간 증가율)
 
 ---
 
@@ -181,12 +199,17 @@ patchscribe/
 
 ## 🎯 실험 조건 (C1-C4)
 
-| 조건 | 설명 | 예상 성공률 |
-|------|------|------------|
-| **C1** (Baseline) | Post-hoc, no formal guidance | ~30% |
-| **C2** (Vague Hints) | Informal prompts | ~40% |
-| **C3** (Pre-hoc) | E_bug without verification | ~50% |
-| **C4** (Full) | E_bug + triple verification | ~70% |
+| 조건 | E_bug | Consistency Check | 설명 |
+|------|-------|-------------------|------|
+| **C1** (Baseline) | ✗ | ✗ | 프롬프트만, 형식 명세 없음 |
+| **C2** (Vague Hints) | Vague | ✗ | 비형식 힌트 제공 |
+| **C3** (Pre-hoc) | ✓ | ✗ | E_bug 있음, 일관성 체크 없음 |
+| **C4** (Full PatchScribe) | ✓ | ✓ | E_bug + E_patch + Consistency |
+
+**주요 특징**:
+- ✅ LLM Judge 기반 평가 → 패치 품질과 설명 품질을 직접 측정
+- ✅ Consistency Check → E_bug ↔ E_patch 논리적 일관성 체크
+- ✅ 실용적이고 빠른 평가 방식
 
 ---
 
@@ -207,6 +230,10 @@ python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
 # 특정 모델 + 조건
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
     --models llama3.2:1b --conditions c4
+
+# 일관성 체크 비활성화 (C1, C2 조건에서는 자동 비활성화됨)
+python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
+    --conditions c1 c2 --disable-consistency-check
 ```
 
 **전체 실험 대상 모델 (16개)**:

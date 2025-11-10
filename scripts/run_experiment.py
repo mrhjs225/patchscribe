@@ -37,6 +37,7 @@ from patchscribe.llm import (
     DEFAULT_GEMINI_MODEL as LLM_DEFAULT_GEMINI_MODEL,
     DEFAULT_OLLAMA_ENDPOINT,
     DEFAULT_OPENAI_ENDPOINT,
+    PromptOptions,
 )
 
 
@@ -87,9 +88,23 @@ DEFAULT_LLM_MAX_TOKENS = 2048
 DEFAULT_GEMINI_MODEL = LLM_DEFAULT_GEMINI_MODEL
 
 CONCURRENCY_ALLOWED_MODELS = {
-    'openai': set(OPENAI_MODELS),
-    'anthropic': set(ANTHROPIC_MODELS),
-    'gemini': {"gemini-2.5-pro", "gemini-2.5-flash"},
+    'openai': {
+        "gpt-5-mini",
+        "gpt-4.1-mini",
+    },
+    'anthropic': {
+        "claude-haiku-4-5",
+        "claude-3-5-haiku",
+    },
+    'gemini': {
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+    },
+}
+
+AUTO_PROVIDER_MAX_TOKENS = {
+    'anthropic': 4096,
+    'gemini': 4096,
 }
 
 
@@ -107,6 +122,31 @@ def select_default_models(provider: str, *, quick: bool = False) -> List[str]:
     if provider == 'gemini':
         return [DEFAULT_GEMINI_MODEL] if quick else list(GEMINI_MODELS)
     return [DEFAULT_MODELS[0]] if quick else list(DEFAULT_MODELS)
+
+
+def parse_prompt_components_arg(raw: str | None) -> PromptOptions:
+    """Return PromptOptions parsed from CLI input."""
+    if not raw or raw.strip().lower() == "all":
+        return PromptOptions()
+    if raw.strip().lower() == "none":
+        return PromptOptions(False, False, False, False)
+    tokens = {token.strip().lower() for token in raw.split(",") if token.strip()}
+    valid_tokens = {
+        "interventions",
+        "natural",
+        "guidelines",
+        "provider_hint",
+        "provider",
+    }
+    invalid = tokens - valid_tokens
+    if invalid:
+        raise ValueError(f"Unknown prompt component(s): {', '.join(sorted(invalid))}")
+    return PromptOptions(
+        include_interventions="interventions" in tokens,
+        include_natural_context="natural" in tokens,
+        include_guidelines="guidelines" in tokens,
+        include_provider_hint=bool({"provider_hint", "provider"} & tokens),
+    )
 
 
 def print_llm_settings(llm_config: Dict[str, object]) -> None:
@@ -395,6 +435,27 @@ def get_condition_settings(condition: str) -> Tuple[str, bool]:
     return settings.get(condition, ('formal', True))
 
 
+def _supports_parallel_conditions(model_spec: str, llm_config: Dict[str, object]) -> bool:
+    """특정 모델이 조건 병렬 실행을 안전하게 지원하는지 여부."""
+    provider = (llm_config.get('provider') or 'ollama').lower()
+    if provider in {'ollama', 'vllm'}:
+        return False
+    concurrency = llm_config.get('concurrency')
+    if not concurrency or concurrency <= 1:
+        return False
+    model_name = model_spec.split(':', 1)[1] if model_spec.startswith('ollama:') else model_spec
+    model_basename = model_name.split('/')[-1] if model_name else model_name
+    allowed = CONCURRENCY_ALLOWED_MODELS.get(provider, set())
+    return model_basename in allowed
+
+
+def _model_output_dir(output_dir: Path, model_name: str, run_label: Optional[str]) -> Path:
+    base_dir = output_dir / model_name
+    if run_label:
+        return base_dir / run_label
+    return base_dir
+
+
 def run_single_evaluation(
     cases: List[Dict],
     model_spec: str,
@@ -402,7 +463,10 @@ def run_single_evaluation(
     output_file: Path,
     *,
     llm_config: Dict[str, object],
-    verbose: bool = True
+    disable_consistency_check: bool = False,
+    verbose: bool = True,
+    stage1_cache_dir: Optional[Path] = None,
+    force_stage1_recompute: bool = False,
 ) -> Dict:
     """단일 모델 × 조건에 대한 평가 실행"""
     from patchscribe.pipeline import PatchScribePipeline
@@ -423,6 +487,7 @@ def run_single_evaluation(
     timeout = llm_config.get('timeout')
     max_tokens = llm_config.get('max_tokens')
     concurrency = llm_config.get('concurrency')
+    prompt_options = llm_config.get('prompt_options')
     model_basename = model_name.split('/')[-1] if model_name else model_name
     concurrency_allowed = (
         provider == 'openai' and model_basename in CONCURRENCY_ALLOWED_MODELS.get('openai', set())
@@ -472,20 +537,26 @@ def run_single_evaluation(
                 print("    ⚠️ LLM concurrency ignored (no supported models for this provider).")
 
     # 조건별 설정
-    strategy, enable_consistency = get_condition_settings(condition)
+    strategy, condition_consistency = get_condition_settings(condition)
+
+    # Consistency check: 조건 설정과 CLI 옵션 모두 고려
+    final_consistency_check = condition_consistency and not disable_consistency_check
 
     if verbose:
         print(f"\n>>> Running: {model_name} - Condition {condition}")
         print(f"    Cases: {len(cases)}")
         print(f"    Strategy: {strategy}")
-        print(f"    Consistency check: {enable_consistency}")
+        print(f"    Consistency check: {final_consistency_check}")
 
     # 파이프라인 설정
     pipeline = PatchScribePipeline(
         strategy=strategy,
         explain_mode='both',
-        enable_consistency_check=enable_consistency,
-        enable_performance_profiling=True
+        enable_consistency_check=final_consistency_check,
+        enable_performance_profiling=True,
+        stage1_cache_dir=stage1_cache_dir,
+        force_stage1_recompute=force_stage1_recompute,
+        prompt_options=prompt_options,
     )
 
     # 평가 실행
@@ -562,12 +633,20 @@ def run_experiment(
     generate_incomplete: bool = True,
     server_id: int = None,
     verbose: bool = True,
-    parallel_conditions: bool = False
+    parallel_conditions: bool = False,
+    disable_consistency_check: bool = False,
+    stage1_cache_dir: Optional[Path] = None,
+    force_stage1_recompute: bool = False,
+    precompute_stage1_only: bool = False,
 ):
     """통합 실험 실행
 
     Args:
         parallel_conditions: True면 모든 (모델, condition) 조합을 병렬 처리
+        disable_consistency_check: E_bug/E_patch 일관성 체크 비활성화
+        stage1_cache_dir: Stage-1 캐시 경로 (None이면 비활성)
+        force_stage1_recompute: 캐시에 있더라도 Stage-1 재계산 여부
+        precompute_stage1_only: True면 캐시만 채우고 LLM 호출 없이 종료
     """
 
     # 케이스 로드
@@ -580,6 +659,24 @@ def run_experiment(
         print(f"  Loaded {len(cases)} cases")
         if start_index > 0:
             print(f"  Range: {start_index} to {start_index + len(cases) - 1}")
+
+    if precompute_stage1_only:
+        if not stage1_cache_dir:
+            raise ValueError("Stage-1 cache directory must be provided for precompute mode.")
+        print_header("Stage-1 Precompute Mode")
+        _precompute_stage1_batch(
+            cases,
+            stage1_cache_dir,
+            force_stage1_recompute=force_stage1_recompute,
+            verbose=verbose,
+        )
+        print("\n✅ Stage-1 artifacts cached for all assigned cases.")
+        return []
+
+    run_label = datetime.now().strftime("%Y%m%d-%H%M%S")
+    if verbose:
+        print(f"  Run identifier: {run_label}")
+        print("  Each model's outputs will be stored in model/<timestamp>/ directories.")
 
     # 케이스 저장 (분산 실험용)
     if server_id is not None:
@@ -595,12 +692,14 @@ def run_experiment(
     if parallel_conditions:
         results_summary = _run_experiment_parallel(
             cases, models, conditions, output_dir, llm_config,
-            server_id, verbose
+            server_id, verbose, run_label, disable_consistency_check,
+            stage1_cache_dir, force_stage1_recompute
         )
     else:
         results_summary = _run_experiment_sequential(
             cases, models, conditions, output_dir, llm_config,
-            server_id, verbose
+            server_id, verbose, run_label, disable_consistency_check,
+            stage1_cache_dir, force_stage1_recompute
         )
 
     # 불완전 패치 생성 (RQ2)
@@ -639,11 +738,17 @@ def run_experiment(
     print("\nGenerated files:")
     for model_spec in models:
         model_name = model_spec.split(':', 1)[1] if ':' in model_spec else model_spec
-        model_dir = output_dir / model_name
+        model_dir = _model_output_dir(output_dir, model_name, run_label)
+        if not model_dir.exists():
+            model_dir = output_dir / model_name
         if model_dir.exists():
             json_files = list(model_dir.glob("*.json"))
             if json_files:
-                print(f"  {model_name}/: {len(json_files)} files")
+                try:
+                    relative_path = model_dir.relative_to(output_dir)
+                except ValueError:
+                    relative_path = Path(model_name)
+                print(f"  {relative_path}/: {len(json_files)} files")
 
     # Next steps
     print_header("Next Steps")
@@ -662,7 +767,11 @@ def _run_experiment_sequential(
     output_dir: Path,
     llm_config: Dict[str, object],
     server_id: int,
-    verbose: bool
+    verbose: bool,
+    run_label: Optional[str] = None,
+    disable_consistency_check: bool = False,
+    stage1_cache_dir: Optional[Path] = None,
+    force_stage1_recompute: bool = False,
 ) -> List[Dict]:
     """순차 처리 모드 (기존 동작)"""
     results_summary = []
@@ -675,7 +784,7 @@ def _run_experiment_sequential(
         print(f"{'#' * 70}")
 
         # 모델별 결과 디렉토리
-        model_output_dir = output_dir / model_name
+        model_output_dir = _model_output_dir(output_dir, model_name, run_label)
         model_output_dir.mkdir(parents=True, exist_ok=True)
 
         model_results = {
@@ -700,7 +809,10 @@ def _run_experiment_sequential(
                     condition,
                     output_file,
                     llm_config=llm_config,
-                    verbose=verbose
+                    disable_consistency_check=disable_consistency_check,
+                    verbose=verbose,
+                    stage1_cache_dir=stage1_cache_dir,
+                    force_stage1_recompute=force_stage1_recompute,
                 )
                 model_results['conditions'][condition] = {
                     'success_rate': result['metrics'].get('success_rate', 0),
@@ -739,18 +851,27 @@ def _run_experiment_parallel(
     output_dir: Path,
     llm_config: Dict[str, object],
     server_id: int,
-    verbose: bool
+    verbose: bool,
+    run_label: Optional[str] = None,
+    disable_consistency_check: bool = False,
+    stage1_cache_dir: Optional[Path] = None,
+    force_stage1_recompute: bool = False,
 ) -> List[Dict]:
     """병렬 처리 모드: 모든 (모델, condition) 조합을 동시에 처리"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import threading
 
-    # 모든 작업 조합 생성
-    tasks = []
+    parallel_tasks = []
+    sequential_tasks = []
+    sequential_models = set()
+
     for model_spec in models:
         model_name = model_spec.split(':', 1)[1] if ':' in model_spec else model_spec
-        model_output_dir = output_dir / model_name
+        model_output_dir = _model_output_dir(output_dir, model_name, run_label)
         model_output_dir.mkdir(parents=True, exist_ok=True)
+        supports_parallel = _supports_parallel_conditions(model_spec, llm_config)
+        if not supports_parallel:
+            sequential_models.add(model_name)
 
         for condition in conditions:
             if server_id is not None:
@@ -759,13 +880,20 @@ def _run_experiment_parallel(
                 result_filename = f"{condition}_results.json"
 
             output_file = model_output_dir / result_filename
-            tasks.append((model_spec, model_name, condition, output_file))
+            task = (model_spec, model_name, condition, output_file)
+            if supports_parallel:
+                parallel_tasks.append(task)
+            else:
+                sequential_tasks.append(task)
 
+    total_tasks = len(parallel_tasks) + len(sequential_tasks)
     if verbose:
-        print(f"\n🚀 Starting {len(tasks)} tasks in parallel...")
+        print(f"\n🚀 Starting {total_tasks} tasks (parallel where safe)...")
         print(f"   Models: {len(models)}")
         print(f"   Conditions: {len(conditions)}")
-        print(f"   Total combinations: {len(tasks)}")
+        print(f"   Parallel combinations: {len(parallel_tasks)}")
+        if sequential_models:
+            print(f"   Sequential only: {', '.join(sorted(sequential_models))}")
 
     # 출력용 Lock
     print_lock = threading.Lock()
@@ -784,7 +912,10 @@ def _run_experiment_parallel(
                 condition,
                 output_file,
                 llm_config=llm_config,
-                verbose=False  # 병렬 실행시 개별 verbose 끔
+                disable_consistency_check=disable_consistency_check,
+                verbose=False,  # 병렬 실행시 개별 verbose 끔
+                stage1_cache_dir=stage1_cache_dir,
+                force_stage1_recompute=force_stage1_recompute,
             )
 
             with print_lock:
@@ -807,35 +938,45 @@ def _run_experiment_parallel(
                 'error': str(e)
             }, e)
 
-    # 병렬 실행
     results_dict = {}
 
-    try:
-        with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
-            futures = {executor.submit(run_task, task): task for task in tasks}
+    def record_result(model_name: str, condition: str, result_info: Dict[str, object]) -> None:
+        if model_name not in results_dict:
+            results_dict[model_name] = {'model': model_name, 'conditions': {}}
+        results_dict[model_name]['conditions'][condition] = result_info
 
-            for future in as_completed(futures):
-                try:
-                    model_name, condition, result_info, error = future.result()
+    # sequential runs (no safe shared parallelism)
+    if sequential_tasks:
+        if verbose:
+            print("\n⚠️  Executing sequentially for non-concurrent models...")
+        for task in sequential_tasks:
+            model_name, condition, result_info, error = run_task(task)
+            record_result(model_name, condition, result_info)
 
-                    if model_name not in results_dict:
-                        results_dict[model_name] = {'model': model_name, 'conditions': {}}
+    # 병렬 실행 (안전한 모델만)
+    if parallel_tasks:
+        try:
+            with ThreadPoolExecutor(max_workers=len(parallel_tasks)) as executor:
+                futures = {executor.submit(run_task, task): task for task in parallel_tasks}
 
-                    results_dict[model_name]['conditions'][condition] = result_info
+                for future in as_completed(futures):
+                    try:
+                        model_name, condition, result_info, error = future.result()
+                        record_result(model_name, condition, result_info)
 
-                except KeyboardInterrupt:
-                    print("\n\n⚠️  Interrupted by user")
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    sys.exit(130)
-                except Exception as e:
-                    if verbose:
-                        print(f"  ❌ Unexpected error: {e}")
-                        import traceback
-                        traceback.print_exc()
+                    except KeyboardInterrupt:
+                        print("\n\n⚠️  Interrupted by user")
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        sys.exit(130)
+                    except Exception as e:
+                        if verbose:
+                            print(f"  ❌ Unexpected error: {e}")
+                            import traceback
+                            traceback.print_exc()
 
-    except KeyboardInterrupt:
-        print("\n\n⚠️  Interrupted by user")
-        sys.exit(130)
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Interrupted by user")
+            sys.exit(130)
 
     # 결과를 모델 순서대로 정렬
     results_summary = [results_dict[model_spec.split(':', 1)[1] if ':' in model_spec else model_spec]
@@ -940,6 +1081,14 @@ def main():
         action='store_true',
         help='불완전 패치 생성 건너뛰기'
     )
+
+    # Verification configuration
+    parser.add_argument(
+        '--disable-consistency-check',
+        action='store_true',
+        help='E_bug/E_patch 일관성 체크 비활성화. 기본값: 활성화'
+    )
+
     # LLM configuration
     parser.add_argument(
         '--llm-provider',
@@ -967,9 +1116,29 @@ def main():
         help='LLM 동시 요청 수 (OpenAI, Claude, Gemini 지원 모델에만 적용)'
     )
     parser.add_argument(
+        '--prompt-components',
+        default='all',
+        help="유지할 프롬프트 구성요소 지정 (interventions,natural,guidelines,provider_hint|all|none)."
+    )
+    parser.add_argument(
         '--parallel-conditions',
         action='store_true',
         help='모든 (모델, condition) 조합을 병렬로 처리 (기본값: 순차 처리)'
+    )
+    parser.add_argument(
+        '--stage1-cache-dir',
+        default='results/cache/stage1',
+        help='Stage-1 캐시 디렉토리 (빈 문자열로 비활성화)'
+    )
+    parser.add_argument(
+        '--precompute-stage1',
+        action='store_true',
+        help='LLM 호출 전 Stage-1 캐시만 생성하고 종료'
+    )
+    parser.add_argument(
+        '--refresh-stage1-cache',
+        action='store_true',
+        help='기존 Stage-1 캐시를 무시하고 재계산'
     )
 
     # Output
@@ -986,6 +1155,12 @@ def main():
 
     args = parser.parse_args()
 
+    stage1_cache_dir = args.stage1_cache_dir.strip() if args.stage1_cache_dir else ""
+    if stage1_cache_dir.lower() in {"", "none", "null"}:
+        normalized_stage1_cache = None
+    else:
+        normalized_stage1_cache = Path(stage1_cache_dir).expanduser()
+
     llm_config = {
         'provider': args.llm_provider,
         'endpoint': args.llm_endpoint,
@@ -993,6 +1168,12 @@ def main():
         'max_tokens': args.llm_max_tokens if args.llm_max_tokens is not None else None,
         'concurrency': args.llm_concurrency if args.llm_concurrency is not None else None,
     }
+    try:
+        prompt_options = parse_prompt_components_arg(args.prompt_components)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    llm_config['prompt_options'] = prompt_options
 
     if not llm_config['endpoint']:
         if args.llm_provider == 'ollama':
@@ -1011,8 +1192,10 @@ def main():
                 model=model_for_endpoint or DEFAULT_GEMINI_MODEL
             )
 
-    if llm_config['max_tokens'] is None and args.llm_provider in {'anthropic', 'gemini'}:
-        llm_config['max_tokens'] = DEFAULT_LLM_MAX_TOKENS
+    if llm_config['max_tokens'] is None:
+        auto_tokens = AUTO_PROVIDER_MAX_TOKENS.get(args.llm_provider.lower())
+        if auto_tokens:
+            llm_config['max_tokens'] = auto_tokens
 
     # Configure based on mode
     if args.quick:
@@ -1080,10 +1263,17 @@ def main():
             generate_incomplete=not args.skip_incomplete_patches,
             server_id=server_id,
             verbose=not args.quiet,
-            parallel_conditions=args.parallel_conditions
+            parallel_conditions=args.parallel_conditions,
+            disable_consistency_check=args.disable_consistency_check,
+            stage1_cache_dir=normalized_stage1_cache,
+            force_stage1_recompute=args.refresh_stage1_cache,
+            precompute_stage1_only=args.precompute_stage1,
         )
 
-        print("\n✅ Experiment completed successfully!\n")
+        if args.precompute_stage1:
+            print("\n✅ Stage-1 caching completed successfully!\n")
+        else:
+            print("\n✅ Experiment completed successfully!\n")
 
     except KeyboardInterrupt:
         print("\n\n⚠️  Experiment interrupted by user\n")
@@ -1093,6 +1283,35 @@ def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+
+def _precompute_stage1_batch(
+    cases: List[Dict],
+    stage1_cache_dir: Path,
+    *,
+    force_stage1_recompute: bool = False,
+    verbose: bool = True,
+) -> None:
+    """Cache Stage-1 artifacts for all cases without invoking any LLMs."""
+    from patchscribe.pipeline import PatchScribePipeline
+
+    if verbose:
+        print(f"\nCaching Stage-1 artifacts into: {stage1_cache_dir}")
+
+    pipeline = PatchScribePipeline(
+        strategy='formal',
+        explain_mode='template',
+        enable_consistency_check=False,
+        enable_performance_profiling=False,
+        stage1_cache_dir=stage1_cache_dir,
+        force_stage1_recompute=force_stage1_recompute,
+    )
+    total = len(cases)
+    for idx, case in enumerate(cases, 1):
+        pipeline.precompute_stage1(case)
+        if verbose:
+            identifier = case.get('id') or case.get('case_id') or f"case_{idx}"
+            print(f"  [{idx}/{total}] cached {identifier}")
 
 
 if __name__ == '__main__':

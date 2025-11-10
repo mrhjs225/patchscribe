@@ -10,7 +10,7 @@ from typing import Iterable, List, Optional, Tuple
 
 from .intervention import InterventionSpec
 from .pcg import PCGNode, ProgramCausalGraph
-from .llm import LLMClient, LLMUnavailable
+from .llm import LLMClient, LLMUnavailable, PromptOptions
 
 
 @dataclass
@@ -33,6 +33,7 @@ class PatchGenerator:
         llm_client: LLMClient | None = None,
         strategy: str = "formal",
         natural_context: str | None = None,
+        prompt_options: PromptOptions | None = None,
     ) -> None:
         self.graph = graph
         self.program = program
@@ -41,6 +42,7 @@ class PatchGenerator:
         self.llm_client = llm_client or LLMClient()
         self.strategy = strategy
         self.natural_context = natural_context
+        self.prompt_options = prompt_options
 
     def generate(self, spec: InterventionSpec) -> PatchResult:
         # Only attempt LLM-guided patch. If it fails, return noop.
@@ -61,6 +63,7 @@ class PatchGenerator:
                 interventions=[intervention.__dict__ for intervention in spec.interventions],
                 strategy=self.strategy,
                 natural_context=self.natural_context,
+                prompt_options=self.prompt_options,
             )
         except LLMUnavailable:
             return None

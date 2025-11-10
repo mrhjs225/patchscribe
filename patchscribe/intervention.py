@@ -23,11 +23,41 @@ class Intervention:
     enforce: str
     rationale: str
 
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "target_line": self.target_line,
+            "enforce": self.enforce,
+            "rationale": self.rationale,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "Intervention":
+        return cls(
+            target_line=int(data.get("target_line", -1)),
+            enforce=data.get("enforce", ""),
+            rationale=data.get("rationale", ""),
+        )
+
 
 @dataclass
 class InterventionSpec:
     interventions: List[Intervention] = field(default_factory=list)
     summary: str = ""
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "summary": self.summary,
+            "interventions": [item.to_dict() for item in self.interventions],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "InterventionSpec":
+        interventions = [
+            Intervention.from_dict(item)
+            for item in data.get("interventions", [])
+            if isinstance(item, dict)
+        ]
+        return cls(interventions=interventions, summary=data.get("summary", ""))
 
 
 class InterventionPlanner:

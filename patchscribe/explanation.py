@@ -28,19 +28,21 @@ def build_prompt_context(
     intervention: InterventionSpec,
 ) -> str:
     vulnerability_line, vulnerability_desc = _vulnerability_node(graph)
-    causal_chain = _format_causal_chain(graph)
-    intervention_text = _format_interventions(intervention)
-    return (
+    sections: List[str] = [
         "Vulnerability summary:\n"
         f"- location: line {vulnerability_line}\n"
-        f"- description: {vulnerability_desc}\n\n"
-        "Causal chain (from PCG):\n"
-        f"{causal_chain}\n\n"
-        "Structural model condition:\n"
-        f"{model.vulnerable_condition or 'Unavailable'}\n\n"
-        "Recommended interventions:\n"
-        f"{intervention_text}"
-    )
+        f"- description: {vulnerability_desc}"
+    ]
+    causal_chain = _format_causal_chain(graph).strip()
+    if _has_meaningful_chain(causal_chain):
+        sections.append("Causal chain (from PCG):\n" + causal_chain)
+    structural_condition = (model.vulnerable_condition or "").strip()
+    if structural_condition:
+        sections.append("Structural model condition:\n" + structural_condition)
+    intervention_text = _format_interventions(intervention).strip()
+    if _has_meaningful_interventions(intervention_text):
+        sections.append("Recommended interventions:\n" + intervention_text)
+    return "\n\n".join(sections)
 
 
 def build_natural_context(
@@ -176,6 +178,18 @@ def _format_causal_chain(graph: ProgramCausalGraph) -> str:
     return "\n".join(lines) if lines else "- predecessors resolved but descriptions missing"
 
 
+def _has_meaningful_chain(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    placeholders = {
+        "- no explicit predecessors (treat as exogenous)",
+        "- unable to determine causal chain",
+        "- predecessors resolved but descriptions missing",
+    }
+    return stripped.lower() not in {p.lower() for p in placeholders}
+
+
 def _format_interventions(spec: InterventionSpec) -> str:
     if not spec.interventions:
         return "- no intervention generated"
@@ -184,6 +198,13 @@ def _format_interventions(spec: InterventionSpec) -> str:
         target = "line N/A" if item.target_line < 0 else f"line {item.target_line}"
         lines.append(f"- {item.enforce} @ {target}: {item.rationale}")
     return "\n".join(lines)
+
+
+def _has_meaningful_interventions(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return stripped.lower() != "- no intervention generated"
 
 
 def _build_formal_summary(model: StructuralCausalModel, effect: dict) -> str:
@@ -212,42 +233,108 @@ def _build_natural_summary(
     vuln_line, vuln_desc = _vulnerability_node(graph)
     causal_chain = _format_causal_chain(graph)
     intervention_text = _format_interventions(intervention)
-    removal_reason = (
-        "The patched condition eliminates the causal prerequisites"
-        if effect.get("vulnerability_removed")
-        else "Formal analysis could not confirm removal of the causal prerequisites"
-    )
+
+    # Enhanced removal reasoning with causal explanation
+    if effect.get("vulnerability_removed"):
+        removal_reason = (
+            "The patch eliminates the vulnerability by breaking the causal chain. "
+            "Specifically:\n"
+            f"- **Vulnerability cause**: {vuln_desc}\n"
+            f"- **Causal path**: {causal_chain}\n"
+            f"- **Intervention**: {intervention_text}\n"
+            "- **Result**: The conditions necessary for exploitation are now unsatisfiable"
+        )
+    else:
+        removal_reason = (
+            "Formal analysis could not confirm complete removal of the vulnerability. "
+            "The patch may provide partial mitigation but additional checks are recommended."
+        )
+
     return (
         "## Vulnerability Fix Explanation\n\n"
         "### What was wrong?\n"
-        f"- Location: line {vuln_line}\n- Issue: {vuln_desc}\n\n"
-        "### Root cause (from PCG)\n"
-        f"{causal_chain}\n\n"
-        "### Planned interventions\n"
-        f"{intervention_text}\n\n"
-        "### Patch summary\n"
+        f"- **Location**: line {vuln_line}\n"
+        f"- **Issue**: {vuln_desc}\n"
+        f"- **Root cause**: {causal_chain}\n\n"
+        "### What code was changed?\n"
         f"{patch_summary}\n\n"
-        "### Why this works\n"
-        f"{removal_reason}\n"
+        "### Why this change fixes the vulnerability?\n"
+        f"{removal_reason}\n\n"
+        "### Causal reasoning\n"
+        "The vulnerability occurred due to a causal chain from inputs to the vulnerable operation. "
+        "The patch intervenes at a critical point in this chain, preventing the vulnerability "
+        "condition from being satisfied.\n"
     )
 
 
 def _summarize_patch(patch: PatchResult) -> str:
     if patch.method == "noop":
         return "No patch applied."
+
+    # Enhanced diff parsing with line numbers and detailed analysis
     if patch.diff:
         diff_lines = patch.diff.splitlines()
-        preview = [line for line in diff_lines if line.startswith("+") or line.startswith("-")]
-        preview_text = "\n".join(preview[:8])
+        added_lines = []
+        removed_lines = []
+        modified_context = []
+        current_line_num = None
+
+        for line in diff_lines:
+            # Parse unified diff line numbers
+            if line.startswith("@@"):
+                # Extract line number from @@ -a,b +c,d @@
+                parts = line.split()
+                if len(parts) >= 3:
+                    try:
+                        # Get the +c,d part
+                        plus_part = [p for p in parts if p.startswith('+')][0]
+                        current_line_num = int(plus_part.split(',')[0].lstrip('+'))
+                    except (IndexError, ValueError):
+                        pass
+                modified_context.append(line)
+            elif line.startswith("+") and not line.startswith("+++"):
+                code = line[1:].strip()
+                if code:  # Skip empty lines
+                    line_info = f"Line {current_line_num}: {code}" if current_line_num else code
+                    added_lines.append(line_info)
+                    if current_line_num:
+                        current_line_num += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                code = line[1:].strip()
+                if code:  # Skip empty lines
+                    removed_lines.append(code)
+            elif current_line_num and line.startswith(" "):
+                # Context line
+                current_line_num += 1
+
+        # Build detailed summary
+        summary_parts = [f"Applied method: {patch.method}"]
+
+        if added_lines:
+            summary_parts.append("\n**Added code:**")
+            for added in added_lines[:5]:  # Show first 5
+                summary_parts.append(f"  + {added}")
+            if len(added_lines) > 5:
+                summary_parts.append(f"  ... and {len(added_lines) - 5} more additions")
+
+        if removed_lines:
+            summary_parts.append("\n**Removed code:**")
+            for removed in removed_lines[:3]:  # Show first 3
+                summary_parts.append(f"  - {removed}")
+            if len(removed_lines) > 3:
+                summary_parts.append(f"  ... and {len(removed_lines) - 3} more removals")
+
+        preview_text = "\n".join(summary_parts)
     else:
         preview_text = "(No diff generated)"
+
     applied = ", ".join(patch.applied_guards) if patch.applied_guards else "None"
     notes = ", ".join(patch.notes) if patch.notes else "None"
+
     return (
-        f"Applied method: {patch.method}.\n"
-        f"Guards: {applied}.\n"
-        f"Notes: {notes}.\n"
-        f"Diff preview:\n{preview_text}"
+        f"{preview_text}\n\n"
+        f"**Applied guards:** {applied}\n"
+        f"**Notes:** {notes}"
     )
 
 
@@ -269,9 +356,18 @@ def _build_llm_prompt(
     objective = (
         "Produce a markdown section that begins with '### Vulnerability Fix Explanation' and answers:\n"
         "1. What caused the vulnerability (what)\n"
-        "2. How the patch changes the code (how)\n"
-        "3. Why this change eliminates the vulnerability (why)\n"
-        "4. Write your response in English."
+        "2. WHICH SPECIFIC CODE LINES were changed (be explicit about line numbers and code)\n"
+        "3. How the patch changes the code (how) - reference the actual diff changes\n"
+        "4. Why this change eliminates the vulnerability (why) - explain the causal link\n"
+        "5. What is the causal relationship between the vulnerability and the fix\n"
+        "6. Write your response in English.\n"
+        "\n"
+        "IMPORTANT REQUIREMENTS:\n"
+        "- You MUST explicitly describe which code was modified (e.g., 'Added NULL check at line X')\n"
+        "- You MUST explain WHY this specific change fixes the vulnerability\n"
+        "- You MUST describe the causal relationship (e.g., 'The vulnerability occurred because X, "
+        "which led to Y. The patch breaks this causal chain by...')\n"
+        "- Reference specific lines from the diff when describing changes"
     )
     if extra_instructions:
         objective += "\n" + extra_instructions.strip()
