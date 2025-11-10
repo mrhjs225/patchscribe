@@ -3,11 +3,12 @@ Simplified intervention planning that targets vulnerable causal conditions.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from itertools import combinations, product
 from typing import Dict, Iterable, List, Set
 
-from .pcg import ProgramCausalGraph
+from .pcg import ProgramCausalGraph, PCGNode
 from .scm import StructuralCausalModel
 
 try:  # pragma: no cover - optional solver
@@ -22,12 +23,18 @@ class Intervention:
     target_line: int
     enforce: str
     rationale: str
+    semantic_action: str = ""  # NEW: Constructive guidance for LLM
+    causal_role: str = ""      # NEW: Explanation of causal role
+    variable_name: str = ""    # NEW: Semantic variable name
 
     def to_dict(self) -> Dict[str, object]:
         return {
             "target_line": self.target_line,
             "enforce": self.enforce,
             "rationale": self.rationale,
+            "semantic_action": self.semantic_action,
+            "causal_role": self.causal_role,
+            "variable_name": self.variable_name,
         }
 
     @classmethod
@@ -36,6 +43,9 @@ class Intervention:
             target_line=int(data.get("target_line", -1)),
             enforce=data.get("enforce", ""),
             rationale=data.get("rationale", ""),
+            semantic_action=data.get("semantic_action", ""),
+            causal_role=data.get("causal_role", ""),
+            variable_name=data.get("variable_name", ""),
         )
 
 
@@ -80,13 +90,24 @@ class InterventionPlanner:
                 if node_id not in self.graph.nodes:
                     continue
                 parent = self.graph.nodes[node_id]
+
+                # Generate semantic action guidance
+                semantic_action = self._generate_action_guidance(parent, variable)
+
+                # Generate causal explanation
+                causal_role = self._explain_causal_role(parent, vuln_node)
+
                 enforce = f"ENFORCE NOT {variable}"
                 rationale = f"Prevent {parent.description} from triggering vulnerability"
+
                 interventions.append(
                     Intervention(
                         target_line=parent.location or -1,
                         enforce=enforce,
                         rationale=rationale,
+                        semantic_action=semantic_action,
+                        causal_role=causal_role,
+                        variable_name=variable,
                     )
                 )
         interventions = _deduplicate_interventions(interventions)
@@ -110,7 +131,109 @@ class InterventionPlanner:
 
     @staticmethod
     def _node_from_variable(variable: str) -> str:
-        return variable[2:] if variable.startswith("V_") else variable
+        """Extract node ID from variable name"""
+        # Handle both old format (V_p1) and new semantic format (null_check_authkey_p1)
+        if variable.startswith("V_"):
+            return variable[2:]
+        # New semantic format: extract last part after underscore
+        parts = variable.split("_")
+        if len(parts) >= 2:
+            return parts[-1]  # Return the node_id part
+        return variable
+
+    def _generate_action_guidance(self, node: PCGNode, variable: str) -> str:
+        """Generate constructive guidance for LLM without prescribing exact code"""
+        desc = node.description.lower() if node.description else ""
+
+        # Determine the semantic action type from variable name
+        if "null_check" in variable:
+            var_name = self._extract_var_from_description(desc)
+            return (
+                f"Add null pointer validation for '{var_name or 'the pointer'}' before line {node.location}. "
+                f"The validation should prevent execution from reaching the vulnerable operation "
+                f"when the pointer is NULL."
+            )
+
+        elif "bounds_check" in variable:
+            return (
+                f"Add bounds checking before line {node.location}. "
+                f"Ensure the size/length is validated against the buffer capacity "
+                f"before any access operation."
+            )
+
+        elif "state_valid" in variable or "state" in desc:
+            return (
+                f"Add state validation before line {node.location}. "
+                f"Verify that the object is in a valid state before proceeding "
+                f"with operations that assume proper initialization."
+            )
+
+        elif "auth_check" in variable or "auth" in desc:
+            return (
+                f"Add authentication/authorization check before line {node.location}. "
+                f"Verify that the caller has appropriate credentials or permissions "
+                f"before accessing protected resources."
+            )
+
+        elif "zero_check" in variable or ("== 0" in desc or "!= 0" in desc):
+            return (
+                f"Add zero value check before line {node.location}. "
+                f"Ensure the value is validated to prevent division by zero or "
+                f"other zero-related vulnerabilities."
+            )
+
+        elif "error_check" in variable or "error" in desc or "ret" in desc:
+            return (
+                f"Add error return value check before line {node.location}. "
+                f"Validate that the previous operation succeeded before continuing."
+            )
+
+        else:
+            # Generic guidance based on node description
+            return (
+                f"Add validation for the condition '{node.description}' before line {node.location}. "
+                f"Ensure this predicate is properly checked to prevent the causal path to vulnerability."
+            )
+
+    def _explain_causal_role(self, node: PCGNode, vuln_node: PCGNode) -> str:
+        """Explain why this intervention breaks the causal chain"""
+        if not vuln_node:
+            return "This condition is a causal prerequisite for the vulnerability."
+
+        # Compute path length (simplified: check if direct parent)
+        vuln_parents = self.graph.predecessors(vuln_node.node_id)
+
+        if node.node_id in vuln_parents:
+            return (
+                f"This condition at line {node.location} directly enables the vulnerable operation "
+                f"at line {vuln_node.location}. By blocking this condition, the vulnerability becomes unreachable."
+            )
+        else:
+            return (
+                f"This condition at line {node.location} is part of a causal chain leading to "
+                f"the vulnerability at line {vuln_node.location}. Intervening here prevents the cascade "
+                f"of conditions that enable the exploit."
+            )
+
+    def _extract_var_from_description(self, description: str) -> str:
+        """Extract variable name from description"""
+        # Match patterns like: !var, var==NULL, var!=NULL, etc.
+        patterns = [
+            r'!\s*(\w+)',                # !authkey
+            r'(\w+)\s*==\s*NULL',        # ptr == NULL
+            r'(\w+)\s*!=\s*NULL',        # ptr != NULL
+            r'if\s*\(\s*!?\s*(\w+)',     # if (!var) or if (var)
+            r'(\w+)\s*==\s*0',           # var == 0
+            r'(\w+)\s*!=\s*0',           # var != 0
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, description)
+            if match:
+                var = match.group(1)
+                # Filter out common keywords
+                if var not in ['if', 'for', 'while', 'return', 'NULL', 'null']:
+                    return var
+        return ""
 
 
 class _Expr:

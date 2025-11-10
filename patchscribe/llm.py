@@ -38,7 +38,7 @@ DEFAULT_GEMINI_ENDPOINT_TEMPLATE = (
 DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
 
 # Judge model configuration (fixed to OpenAI GPT-5-mini)
-DEFAULT_JUDGE_MODEL = "gpt-5"
+DEFAULT_JUDGE_MODEL = "gpt-5-mini"
 DEFAULT_OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 DEFAULT_OPENAI_COMPLETION_MODEL = DEFAULT_JUDGE_MODEL
 

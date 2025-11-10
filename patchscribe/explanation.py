@@ -4,7 +4,7 @@ Natural-language and structured explanation utilities for PatchScribe.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple, Set
 
 from .intervention import InterventionSpec
 from .llm import LLMClient, LLMUnavailable
@@ -159,23 +159,55 @@ def _vulnerability_node(graph: ProgramCausalGraph) -> tuple[int, str]:
 
 
 def _format_causal_chain(graph: ProgramCausalGraph) -> str:
+    """Generate causal flow narrative instead of flat list"""
     vuln_id = None
+    vuln_node = None
     for node_id, node in graph.nodes.items():
         if node.node_type == "vulnerability":
             vuln_id = node_id
+            vuln_node = node
             break
+
     if vuln_id is None:
-        return "- unable to determine causal chain"
-    parents = graph.predecessors(vuln_id)
-    if not parents:
-        return "- no explicit predecessors (treat as exogenous)"
-    lines: List[str] = []
-    for parent_id in parents:
-        node = graph.nodes.get(parent_id)
-        if not node:
-            continue
-        lines.append(f"- {node.description} (line {node.location})")
-    return "\n".join(lines) if lines else "- predecessors resolved but descriptions missing"
+        return "Unable to determine causal chain to vulnerability."
+
+    # Trace causal path backwards from vulnerability
+    causal_path = _trace_causal_path_backwards(graph, vuln_id)
+
+    if not causal_path:
+        return (
+            f"The vulnerability at line {vuln_node.location} occurs directly "
+            f"without intermediate causal conditions."
+        )
+
+    # Build narrative
+    narrative_parts = []
+    narrative_parts.append(
+        f"The vulnerability at line {vuln_node.location} occurs through this causal flow:"
+    )
+
+    for i, (pred_id, curr_id) in enumerate(causal_path, 1):
+        pred_node = graph.nodes[pred_id]
+        curr_node = graph.nodes[curr_id]
+
+        # Determine relationship
+        if curr_id == vuln_id:
+            relationship = "directly enables the vulnerable operation"
+        elif i == len(causal_path):
+            relationship = "directly enables"
+        else:
+            relationship = "leads to"
+
+        narrative_parts.append(
+            f"{i}. At line {pred_node.location}, the condition `{pred_node.description}` "
+            f"{relationship} {'the vulnerability' if curr_id == vuln_id else f'line {curr_node.location}'}"
+        )
+
+    narrative_parts.append(
+        "\nBreaking any link in this causal chain will prevent the vulnerability."
+    )
+
+    return "\n".join(narrative_parts)
 
 
 def _has_meaningful_chain(text: str) -> bool:
@@ -526,3 +558,41 @@ def _describe_patch_effect(effect: dict) -> str:
     if diagnostics:
         lines.append(f"- 추가 진단 정보: {diagnostics}")
     return "\n".join(lines)
+
+
+def _trace_causal_path_backwards(
+    graph: ProgramCausalGraph,
+    vuln_id: str,
+    max_depth: int = 5
+) -> List[Tuple[str, str]]:
+    """Trace backwards from vulnerability to find causal path"""
+    path = []
+    current = vuln_id
+    visited: Set[str] = set()
+
+    for _ in range(max_depth):
+        if current in visited:
+            break
+        visited.add(current)
+
+        predecessors = list(graph.predecessors(current))
+        if not predecessors:
+            break
+
+        # Choose most direct predecessor (heuristic: closest line number)
+        current_node = graph.nodes.get(current)
+        if not current_node:
+            break
+
+        best_pred = min(
+            predecessors,
+            key=lambda p: abs(graph.nodes[p].location - current_node.location)
+            if graph.nodes.get(p) and graph.nodes.get(p).location and current_node.location
+            else float('inf')
+        )
+
+        path.append((best_pred, current))
+        current = best_pred
+
+    # Reverse to show forward flow
+    return list(reversed(path))
