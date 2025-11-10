@@ -6,8 +6,11 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 from urllib.parse import urljoin
+
+if TYPE_CHECKING:
+    from .spec_builder import SpecificationLevel
 
 try:  # pragma: no cover - optional dependency
     import requests
@@ -31,7 +34,7 @@ DEFAULT_VLLM_MODEL = "openai/gpt-oss-120b"
 DEFAULT_ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5"
 DEFAULT_ANTHROPIC_VERSION = "2023-06-01"
-DEFAULT_LLM_MAX_TOKENS = 2048
+DEFAULT_LLM_MAX_TOKENS = 8192
 DEFAULT_GEMINI_ENDPOINT_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
@@ -97,7 +100,7 @@ class LLMConfig:
                 api_key=os.environ.get("OPENAI_API_KEY"),
                 model=DEFAULT_JUDGE_MODEL,
                 timeout=int(os.environ.get("PATCHSCRIBE_JUDGE_TIMEOUT", "120")),
-                max_tokens=None,
+                max_tokens=1024,
             )
 
         provider = (os.environ.get("PATCHSCRIBE_LLM_PROVIDER") or "ollama").lower()
@@ -725,6 +728,56 @@ class LLMClient:
         return None
 
     @staticmethod
+    def _build_unified_prompt(
+        original_code: str,
+        vulnerability_signature: str,
+        spec_level: Optional["SpecificationLevel"] = None,
+    ) -> str:
+        """
+        Build unified prompt structure for all conditions.
+
+        This is the NEW prompt building method that uses SpecificationLevel
+        to provide consistent structure across all experimental conditions.
+
+        Args:
+            original_code: The vulnerable C function
+            vulnerability_signature: Vulnerability signature string
+            spec_level: Specification at appropriate detail level (None for C1)
+
+        Returns:
+            Formatted prompt string
+        """
+        # Header section (same for all conditions)
+        prompt = "# 보안 패치 작성\n\n"
+        prompt += "## 역할\n"
+        prompt += "당신은 C 프로그램의 보안 취약점을 수정하는 전문가입니다.\n\n"
+
+        # Vulnerable code section (same for all conditions)
+        prompt += "## 취약한 코드\n"
+        prompt += "```c\n"
+        prompt += original_code.strip()
+        prompt += "\n```\n\n"
+        prompt += f"**취약점 시그니처**: `{vulnerability_signature}`\n\n"
+
+        # Specification section (condition-dependent)
+        if spec_level:
+            prompt += spec_level.content + "\n\n"
+
+        # Output requirements (same for all conditions)
+        prompt += "## 출력\n"
+        prompt += "다음 두 가지를 제공하세요:\n\n"
+        prompt += "1. **수정된 C 코드**:\n"
+        prompt += "   - 취약점을 제거하는 최소한의 변경\n"
+        prompt += "   - 주석이나 마크다운 코드 블록 없이 순수 C 코드만\n"
+        prompt += "   - 함수 시그니처와 기존 동작을 유지\n\n"
+        prompt += "2. **설명**:\n"
+        prompt += "   - 취약점이 발생한 원인 (어떤 조건에서 문제가 발생하는가)\n"
+        prompt += "   - 패치가 취약점을 수정하는 방식 (어떤 변경이 어떻게 작동하는가)\n"
+        prompt += "   - 인과 관계 (왜 이 변경이 문제를 해결하는가)\n"
+
+        return prompt
+
+    @staticmethod
     def _build_prompt(
         original_code: str,
         vulnerability_signature: str,
@@ -734,7 +787,22 @@ class LLMClient:
         natural_context: str | None = None,
         provider_hint: str | None = None,
         prompt_options: PromptOptions | None = None,
+        spec_level: Optional["SpecificationLevel"] = None,
     ) -> str:
+        """
+        Build prompt for patch generation.
+
+        NOTE: This method now supports both old and new prompt styles.
+        If spec_level is provided, it uses the new unified prompt structure.
+        Otherwise, it falls back to the legacy prompt building logic.
+        """
+        # NEW: Use unified prompt if spec_level is provided
+        if spec_level is not None:
+            return LLMClient._build_unified_prompt(
+                original_code, vulnerability_signature, spec_level
+            )
+
+        # LEGACY: Old prompt building logic (for backward compatibility)
         options = prompt_options or PromptOptions()
         spec_lines = [
             "- target_line: {target_line}\n  enforce: {enforce}\n  rationale: {rationale}".format(**item)

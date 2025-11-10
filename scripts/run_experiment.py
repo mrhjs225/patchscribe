@@ -103,8 +103,8 @@ CONCURRENCY_ALLOWED_MODELS = {
 }
 
 AUTO_PROVIDER_MAX_TOKENS = {
-    'anthropic': 4096,
-    'gemini': 4096,
+    'anthropic': 8192,
+    'gemini': 8192,
 }
 
 
