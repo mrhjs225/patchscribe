@@ -99,12 +99,16 @@ class SpecificationBuilder:
         natural_context: Optional[str]
     ) -> SpecificationLevel:
         """
-        C2: Abstract specification (high-level only)
+        C2: Abstract specification with enhanced scenario description
 
         Provides:
-        - CWE type
+        - CWE type with detailed description
         - Safety property
-        - Optional natural language hint
+        - Natural language vulnerability scenario
+        - High-level mitigation direction
+
+        Strengthened to better differentiate from C1 by providing
+        concrete vulnerability scenarios and mitigation hints.
         """
         content_parts = ["## 보안 요구사항\n"]
 
@@ -114,8 +118,13 @@ class SpecificationBuilder:
 
         content_parts.append(f"\n**필요한 보호**: {safety_property}")
 
+        # Enhanced natural language guidance
         if natural_context:
-            content_parts.append(f"\n**참고 정보**:\n{natural_context}")
+            content_parts.append(f"\n## 취약점 발생 시나리오\n{natural_context}")
+            content_parts.append(f"\n**수정 방향**: 위 시나리오를 차단하는 검증 또는 가드를 추가하세요.")
+        else:
+            # Fallback: Provide generic but helpful guidance
+            content_parts.append(f"\n**수정 방향**: {safety_property}를 보장하는 검증 메커니즘을 추가하세요.")
 
         content = "\n".join(content_parts)
 
@@ -138,13 +147,18 @@ class SpecificationBuilder:
         natural_context: Optional[str]
     ) -> SpecificationLevel:
         """
-        C3: Targeted specification
+        C3: Targeted specification with abstract guidelines
 
         Provides:
         - CWE type
         - Safety property
-        - Specific target locations
-        - Actionable instructions (what to do, where)
+        - Abstract security goals (what to achieve)
+        - Location hints (not strict requirements)
+        - Actionable instructions focused on "what" rather than "where"
+
+        Key difference from C4: Location information is provided as guidance,
+        not as a strict requirement. This gives the model flexibility in
+        implementation while still providing helpful context.
         """
         content_parts = ["## 보안 요구사항\n"]
 
@@ -154,14 +168,19 @@ class SpecificationBuilder:
 
         content_parts.append(f"\n**필요한 보호**: {safety_property}")
 
-        # Add actionable instructions
+        # Add actionable instructions (with abstract guidelines)
         if intervention_spec and intervention_spec.interventions:
             content_parts.append("\n## 수정 지시사항\n")
-            content_parts.append("다음 변경사항을 코드에 적용하세요:\n")
+            content_parts.append("다음 보안 목표를 달성하도록 코드를 수정하세요:\n")
+            content_parts.append("(위치 정보는 참고용이며, 가장 적절한 구현 방법을 선택하세요)\n")
 
             instructions = []
             for intervention in intervention_spec.interventions:
-                action = self.action_generator.translate_intervention(intervention)
+                # Use abstract guideline for C3
+                action = self.action_generator.translate_intervention(
+                    intervention,
+                    use_abstract_guideline=True
+                )
                 instructions.append(self._format_instruction(action, include_rationale=False))
 
             content_parts.append("\n".join(instructions))
@@ -171,6 +190,11 @@ class SpecificationBuilder:
                 intervention_spec.interventions
             )
             content_parts.append(f"\n**요약**: {summary}")
+
+            # Add implementation note
+            content_parts.append("\n**구현 참고사항**:")
+            content_parts.append("• 위치는 가이드라인이며, 코드 구조에 맞게 최적의 위치를 선택하세요")
+            content_parts.append("• 여러 구현 방법이 가능한 경우, 가장 안전하고 간단한 방법을 선택하세요")
 
         # Optional natural context
         if natural_context:
@@ -182,7 +206,7 @@ class SpecificationBuilder:
             level='c3',
             has_cwe_info=True,
             has_safety_property=True,
-            has_target_locations=True,
+            has_target_locations=True,  # Has location hints, not strict requirements
             has_actionable_instructions=True,
             has_causal_analysis=False,
             content=content
@@ -198,58 +222,77 @@ class SpecificationBuilder:
         natural_context: Optional[str]
     ) -> SpecificationLevel:
         """
-        C4: Complete specification
+        C4: Complete specification with enhanced causal reasoning
 
         Provides:
-        - CWE type
-        - Safety property
-        - Causal path analysis (from E_bug)
-        - Detailed actionable instructions with rationale
-        - Consistency requirements
+        - Causal path analysis (PRIMARY - most important, shown first)
+        - Intervention point analysis with explicit connection to causal paths
+        - Streamlined implementation guidance (single format)
+        - Consistency requirements linking back to causal analysis
+
+        Theory: Cognitive Load Theory (Sweller, 1988)
+        - Present critical causal information FIRST to establish mental model
+        - Single coherent format to avoid choice overload
         """
         content_parts = []
 
-        # Causal analysis first (most important for C4)
+        # === SECTION 1: Causal Analysis (TOP PRIORITY) ===
         if ebug and ebug.causal_paths:
-            content_parts.append("## 취약점 인과 분석\n")
+            content_parts.append("# 1. 취약점 인과 분석\n")
+            content_parts.append("다음 인과 경로를 통해 취약점이 발현됩니다:\n")
 
             for path in ebug.causal_paths:
                 path_explanation = self.action_generator.translate_causal_path(path)
                 content_parts.append(path_explanation)
                 content_parts.append("")  # blank line
 
-        # Security requirements
-        content_parts.append("## 보안 요구사항\n")
-        content_parts.append(f"**취약점 유형**: {cwe}")
-        if cwe_description:
-            content_parts.append(f"  - 설명: {cwe_description}")
-
-        content_parts.append(f"\n**필요한 보호**: {safety_property}")
-
-        # Detailed actionable instructions
+        # === SECTION 2: Intervention Point Analysis ===
         if intervention_spec and intervention_spec.interventions:
-            content_parts.append("\n## 수정 지시사항\n")
-            content_parts.append("다음 변경사항을 코드에 정확히 적용하세요:\n")
+            content_parts.append("# 2. 개입 지점 및 근거\n")
+            content_parts.append("**왜 이 지점에서 수정하는가:**\n")
+            content_parts.append("- 위 인과 경로의 핵심 단계를 차단하기 위함")
+            content_parts.append("- 최소 개입 원칙: 가장 효과적이고 부작용이 적은 위치 선택\n")
+
+            intervention_analysis = self.action_generator.generate_intervention_analysis(
+                intervention_spec.interventions
+            )
+            content_parts.append(intervention_analysis)
+
+        # === SECTION 3: Implementation Guide (Single Unified Format) ===
+        if intervention_spec and intervention_spec.interventions:
+            content_parts.append("# 3. 패치 구현 방법\n")
+            content_parts.append("각 개입을 다음과 같이 구현하세요:\n")
 
             instructions = []
-            for intervention in intervention_spec.interventions:
+            for i, intervention in enumerate(intervention_spec.interventions, 1):
                 action = self.action_generator.translate_intervention(intervention)
-                instructions.append(self._format_instruction(action, include_rationale=True))
+
+                # Unified format with causal connection
+                instruction_parts = [f"\n### 개입 {i}"]
+                instruction_parts.append(f"**수행할 작업**: {action.description}")
+                instruction_parts.append(f"**이유**: {action.rationale}")
+                instruction_parts.append(f"**인과 차단**: 섹션 1의 인과 경로 중 해당 단계를 차단")
+                if action.code_hint:
+                    instruction_parts.append(f"**코드 힌트**: `{action.code_hint}`")
+
+                instructions.append("\n".join(instruction_parts))
 
             content_parts.append("\n".join(instructions))
 
-            # Add summary
-            summary = self.action_generator.generate_intervention_summary(
-                intervention_spec.interventions
-            )
-            content_parts.append(f"\n**요약**: {summary}")
+        # === SECTION 4: Security Requirements (moved after implementation) ===
+        content_parts.append("\n# 4. 보안 요구사항\n")
+        content_parts.append(f"**취약점 유형**: {cwe}")
+        if cwe_description:
+            content_parts.append(f"  - 설명: {cwe_description}")
+        content_parts.append(f"\n**필요한 보호**: {safety_property}")
 
-            # Consistency requirements
-            content_parts.append("\n## 일관성 요구사항\n")
-            content_parts.append(
-                "패치는 위에서 설명한 취약점 인과 경로를 차단해야 하며, "
-                "모든 지시사항을 구현해야 합니다."
-            )
+        # === SECTION 5: Consistency Requirements ===
+        content_parts.append("\n# 5. 일관성 검증\n")
+        content_parts.append("패치 작성 후 다음을 확인하세요:\n")
+        content_parts.append("✓ **섹션 1의 인과 경로가 차단**되었는가?")
+        content_parts.append("✓ **섹션 2의 개입 지점** 중 하나 이상이 구현되었는가?")
+        content_parts.append("✓ **최소 개입 원칙**을 따랐는가? (불필요한 변경 최소화)")
+        content_parts.append("✓ 기존 기능에 **부작용이 없는가**?")
 
         # Optional natural context
         if natural_context:

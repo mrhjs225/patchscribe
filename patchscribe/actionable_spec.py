@@ -45,53 +45,76 @@ class ActionableSpecGenerator:
         """Initialize action templates for different intervention types"""
         return {
             "boundary_check": {
-                "description": "줄 {line} 근처에서 배열/버퍼 접근 전에 경계 검사를 추가하세요",
+                "description": "배열/버퍼 접근 전에 경계 검사를 추가하세요",
+                "description_with_location": "줄 {line} 근처에서 배열/버퍼 접근 전에 경계 검사를 추가하세요",
+                "guideline": "배열 인덱스가 사용되기 전에 검증이 필요합니다 (줄 {line} 근처 참고)",
                 "rationale": "경계를 벗어난 접근을 방지하여 버퍼 오버플로우를 차단합니다",
                 "code_hint": "조건: {variable} < {bound} 또는 {variable} >= 0 && {variable} < {bound}"
             },
             "null_check": {
-                "description": "줄 {line} 근처에서 포인터 사용 전에 NULL 검사를 추가하세요",
+                "description": "포인터 사용 전에 NULL 검사를 추가하세요",
+                "description_with_location": "줄 {line} 근처에서 포인터 사용 전에 NULL 검사를 추가하세요",
+                "guideline": "포인터 역참조 전에 NULL 검사가 필요합니다 (줄 {line} 근처 참고)",
                 "rationale": "NULL 포인터 역참조를 방지합니다",
                 "code_hint": "조건: {variable} != NULL"
             },
             "length_check": {
-                "description": "줄 {line} 근처에서 버퍼 크기를 확인하세요",
+                "description": "버퍼 쓰기 전에 충분한 공간이 있는지 확인하세요",
+                "description_with_location": "줄 {line} 근처에서 버퍼 크기를 확인하세요",
+                "guideline": "버퍼 쓰기 작업 전에 크기 검증이 필요합니다 (줄 {line} 근처 참고)",
                 "rationale": "버퍼 오버플로우를 방지하기 위해 쓰기 전에 충분한 공간이 있는지 확인합니다",
                 "code_hint": "조건: available_space >= required_space"
             },
             "sanitize": {
-                "description": "줄 {line} 근처에서 입력값을 검증하고 정제하세요",
+                "description": "입력값을 검증하고 정제하세요",
+                "description_with_location": "줄 {line} 근처에서 입력값을 검증하고 정제하세요",
+                "guideline": "외부 입력이 사용되기 전에 검증이 필요합니다 (줄 {line} 근처 참고)",
                 "rationale": "유효하지 않거나 악의적인 입력을 차단합니다",
                 "code_hint": "유효하지 않은 값은 거부하거나 안전한 기본값으로 대체하세요"
             },
             "range_check": {
-                "description": "줄 {line} 근처에서 값이 유효한 범위 내에 있는지 확인하세요",
+                "description": "값이 유효한 범위 내에 있는지 확인하세요",
+                "description_with_location": "줄 {line} 근처에서 값이 유효한 범위 내에 있는지 확인하세요",
+                "guideline": "값이 사용되기 전에 범위 검증이 필요합니다 (줄 {line} 근처 참고)",
                 "rationale": "범위를 벗어난 값 사용을 방지합니다",
                 "code_hint": "조건: min_value <= {variable} <= max_value"
             },
             "overflow_check": {
-                "description": "줄 {line} 근처에서 정수 오버플로우 가능성을 확인하세요",
+                "description": "정수 오버플로우 가능성을 확인하세요",
+                "description_with_location": "줄 {line} 근처에서 정수 오버플로우 가능성을 확인하세요",
+                "guideline": "산술 연산 전에 오버플로우 검사가 필요합니다 (줄 {line} 근처 참고)",
                 "rationale": "산술 연산 결과가 타입의 범위를 벗어나지 않도록 합니다",
                 "code_hint": "연산 전에 결과값이 MAX/MIN을 초과하지 않는지 확인하세요"
             },
             "size_validation": {
-                "description": "줄 {line} 근처에서 크기 인자가 음수가 아닌지 확인하세요",
+                "description": "크기 인자가 음수가 아닌지 확인하세요",
+                "description_with_location": "줄 {line} 근처에서 크기 인자가 음수가 아닌지 확인하세요",
+                "guideline": "크기 값이 사용되기 전에 유효성 검증이 필요합니다 (줄 {line} 근처 참고)",
                 "rationale": "음수 크기 값으로 인한 예상치 못한 동작을 방지합니다",
                 "code_hint": "조건: size >= 0"
             },
             "guard": {
-                "description": "줄 {line} 근처에서 안전 조건을 만족하지 않으면 조기 반환하세요",
+                "description": "안전 조건을 만족하지 않으면 조기 반환하세요",
+                "description_with_location": "줄 {line} 근처에서 안전 조건을 만족하지 않으면 조기 반환하세요",
+                "guideline": "위험한 코드 경로 진입 전에 안전 검사가 필요합니다 (줄 {line} 근처 참고)",
                 "rationale": "위험한 코드 경로의 실행을 방지합니다",
                 "code_hint": "if (unsafe_condition) {{ return error_code; }}"
             }
         }
 
-    def translate_intervention(self, intervention: Intervention) -> ActionableInstruction:
+    def translate_intervention(
+        self,
+        intervention: Intervention,
+        use_abstract_guideline: bool = False
+    ) -> ActionableInstruction:
         """
         Convert a single Intervention to an ActionableInstruction.
 
         Args:
             intervention: Formal intervention from PCG/SCM analysis
+            use_abstract_guideline: If True, use abstract guidelines instead of
+                                   specific locations (for C3). If False, use
+                                   concrete locations (for C4).
 
         Returns:
             ActionableInstruction with concrete, executable guidance
@@ -106,8 +129,16 @@ class ActionableSpecGenerator:
         variables = self._extract_variables(intervention)
         constraints = self._extract_constraints(intervention)
 
+        # Choose description format based on abstraction level
+        if use_abstract_guideline:
+            # C3: Abstract guideline (location as hint only)
+            description_template = template.get("guideline", template["description"])
+        else:
+            # C4: Concrete location (location as requirement)
+            description_template = template.get("description_with_location", template["description"])
+
         # Format description
-        description = template["description"].format(
+        description = description_template.format(
             line=intervention.target_line,
             variable=variables.get("target", "변수"),
             bound=variables.get("bound", "배열 크기")
@@ -202,18 +233,33 @@ class ActionableSpecGenerator:
         if not path.nodes:
             return path.description
 
-        # Format as numbered steps
-        explanation = "취약점이 발생하는 인과 경로:\n"
+        # Build structured representation
+        explanation_parts = []
 
+        # Format 1: Visual flow diagram
+        explanation_parts.append("**인과 흐름 다이어그램:**")
+        flow = " → ".join([self._humanize_node(node) for node in path.nodes])
+        explanation_parts.append(f"  {flow}\n")
+
+        # Format 2: Detailed step-by-step
+        explanation_parts.append("**단계별 분석:**")
         for i, node in enumerate(path.nodes, 1):
             humanized = self._humanize_node(node)
-            explanation += f"  {i}. {humanized}\n"
+            explanation_parts.append(f"  {i}. {humanized}")
 
-        # Add summary
-        explanation += f"\n설명: {path.description}\n"
-        explanation += "패치는 이 인과 경로를 차단해야 합니다."
+            # Add technical details if available
+            if hasattr(path, 'node_details') and node in path.node_details:
+                details = path.node_details[node]
+                if details.get('location'):
+                    explanation_parts.append(f"     - 위치: {details['location']}")
+                if details.get('variable'):
+                    explanation_parts.append(f"     - 변수: {details['variable']}")
 
-        return explanation
+        # Format 3: Summary and implications
+        explanation_parts.append(f"\n**설명:** {path.description}")
+        explanation_parts.append("\n**패치 요구사항:** 위 인과 경로 중 최소 한 단계를 차단하여 취약점 발현을 방지해야 합니다.")
+
+        return "\n".join(explanation_parts)
 
     def _humanize_node(self, node_id: str) -> str:
         """Convert technical node ID to human-readable description"""
@@ -248,6 +294,39 @@ class ActionableSpecGenerator:
 
         # If no match, return cleaned version
         return node_id.replace("_", " ").title()
+
+    def generate_intervention_analysis(self, interventions: List[Intervention]) -> str:
+        """
+        Generate detailed analysis of intervention points and rationale.
+
+        Args:
+            interventions: List of interventions to analyze
+
+        Returns:
+            Detailed explanation of why these interventions are chosen
+        """
+        if not interventions:
+            return "명시적인 수정 지침이 없습니다."
+
+        analysis_parts = []
+        analysis_parts.append("**개입 지점 분석:**\n")
+
+        for i, intv in enumerate(interventions, 1):
+            action_type = self._infer_action_type(intv)
+            type_names = {
+                "boundary_check": "경계 검사", "null_check": "NULL 검사",
+                "length_check": "길이 검사", "sanitize": "입력 검증",
+                "range_check": "범위 검사", "overflow_check": "오버플로우 검사",
+                "size_validation": "크기 검증", "guard": "안전 가드"
+            }
+            action_name = type_names.get(action_type, action_type)
+
+            analysis_parts.append(f"{i}. **개입 위치**: 줄 {intv.target_line} 근처")
+            analysis_parts.append(f"   - **개입 유형**: {action_name}")
+            analysis_parts.append(f"   - **이유**: {intv.rationale if intv.rationale else '인과 경로를 차단하기 위함'}")
+            analysis_parts.append(f"   - **최소 개입 원칙**: 이 지점은 취약점 경로를 차단하는 가장 효과적인 위치입니다.\n")
+
+        return "\n".join(analysis_parts)
 
     def generate_intervention_summary(self, interventions: List[Intervention]) -> str:
         """

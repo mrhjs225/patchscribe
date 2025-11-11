@@ -41,7 +41,7 @@ DEFAULT_GEMINI_ENDPOINT_TEMPLATE = (
 DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
 
 # Judge model configuration (fixed to OpenAI GPT-5-mini)
-DEFAULT_JUDGE_MODEL = "gpt-5-mini"
+DEFAULT_JUDGE_MODEL = "gpt-5"
 DEFAULT_OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 DEFAULT_OPENAI_COMPLETION_MODEL = DEFAULT_JUDGE_MODEL
 
@@ -100,7 +100,7 @@ class LLMConfig:
                 api_key=os.environ.get("OPENAI_API_KEY"),
                 model=DEFAULT_JUDGE_MODEL,
                 timeout=int(os.environ.get("PATCHSCRIBE_JUDGE_TIMEOUT", "120")),
-                max_tokens=1024,
+                max_tokens=None,
             )
 
         provider = (os.environ.get("PATCHSCRIBE_LLM_PROVIDER") or "ollama").lower()
@@ -119,18 +119,28 @@ class LLMConfig:
         elif provider == "openai":
             model = model or DEFAULT_OPENAI_COMPLETION_MODEL
             api_key = os.environ.get("OPENAI_API_KEY")
+            if max_tokens is None:
+                openai_max_env = os.environ.get("OPENAI_MAX_OUTPUT_TOKENS")
+                if openai_max_env and openai_max_env.lower() != "none":
+                    max_tokens = int(openai_max_env)
         elif provider == "anthropic":
             model = model or DEFAULT_ANTHROPIC_MODEL
             api_key = os.environ.get("ANTHROPIC_API_KEY")
             if max_tokens is None:
-                max_tokens = DEFAULT_LLM_MAX_TOKENS
+                anthropic_max_env = os.environ.get("ANTHROPIC_MAX_OUTPUT_TOKENS")
+                if anthropic_max_env and anthropic_max_env.lower() != "none":
+                    max_tokens = int(anthropic_max_env)
+                else:
+                    max_tokens = DEFAULT_LLM_MAX_TOKENS
         elif provider == "gemini":
             model = model or DEFAULT_GEMINI_MODEL
             if not endpoint:
                 endpoint = DEFAULT_GEMINI_ENDPOINT_TEMPLATE.format(model=model)
             api_key = os.environ.get("GEMINI_API_KEY")
             if max_tokens is None:
-                max_tokens = DEFAULT_LLM_MAX_TOKENS
+                gemini_max_env = os.environ.get("GEMINI_MAX_OUTPUT_TOKENS")
+                if gemini_max_env and gemini_max_env.lower() != "none":
+                    max_tokens = int(gemini_max_env)
         else:
             provider = "ollama"
             model = model or DEFAULT_OLLAMA_MODEL
@@ -907,13 +917,20 @@ class LLMClient:
     ) -> str:
         """Build prompt for judging explanation quality (E_bug and E_patch).
 
+        Evaluates from a developer perspective: "Does this explanation help a developer
+        understand the patch and apply similar fixes in the future?"
+
         Returns a prompt that asks the judge to evaluate:
-        - Accuracy: Technical correctness of the explanation
-        - Completeness: Coverage of key vulnerability aspects
-        - Clarity: Understandability and structure
-        - Causality: Quality of causal reasoning
+        - Vulnerability Understanding: Can a developer understand WHY the code is vulnerable?
+        - Patch Understanding: Can a developer understand HOW the patch works?
+        - Causal Connection: Can a developer understand WHY this patch solves the problem?
+        - Actionability: Can a developer apply this knowledge to similar situations?
         """
-        return f"""Evaluate the quality of the following vulnerability explanations.
+        return f"""You are evaluating vulnerability explanations from a **developer's perspective**.
+The goal is to assess whether these explanations would help a developer:
+1. Understand WHY the original code is vulnerable
+2. Understand HOW the patch fixes it
+3. Apply similar fixes to prevent similar bugs in the future
 
 **Vulnerability Signature:** {vulnerability_signature}
 
@@ -933,18 +950,145 @@ class LLMClient:
 **Patch Explanation (E_patch):**
 {epatch_text.strip()}
 
+---
+
 Evaluate both explanations on the following dimensions (1-5 scale, where 5 is best):
 
-1. **Accuracy**: Are the explanations technically correct? Do they accurately describe the vulnerability and fix?
-2. **Completeness**: Do they cover all key aspects (root cause, attack vector, mitigation)?
-3. **Clarity**: Are they clear, well-structured, and understandable?
-4. **Causality**: Do they provide good causal reasoning about why the bug exists and how the patch fixes it?
+### 1. Vulnerability Understanding (1-5)
+**Question:** Can a developer understand WHY the original code is vulnerable?
+
+**Criteria:**
+- **Trigger Conditions** (1.5 pts): Does it explain under what conditions (inputs, states) the vulnerability occurs?
+  - ✅ EXCELLENT: "when user input > buffer size (256 bytes)" or "when idev is NULL"
+  - ❌ WEAK: "when invalid input is provided"
+  - Must be **specific and testable**
+- **Vulnerable Location** (2.0 pts): Does it precisely identify the vulnerable code location (function, line numbers)?
+  - ✅ EXCELLENT: "Line 9: idev->cnf.disable_ipv6 dereference without prior NULL check"
+  - ✅ GOOD: "idev dereference in addrconf_disable_ipv6()"
+  - ❌ WEAK: "the function has a vulnerability"
+  - **Must include**: Function name, line number, or variable name
+- **Root Cause** (1.5 pts): Does it explain the underlying programming error?
+  - ✅ EXCELLENT: "Missing NULL check allows pointer dereference when lookup fails"
+  - ✅ GOOD: "No bounds check before strcpy"
+  - ❌ WEAK: "improper validation" or "insecure code"
+  - **Post-hoc explanations** often use generic terms → lower score
+
+**Scoring:**
+- 5: All three criteria with specific, concrete details
+- 4: Two criteria with concrete details, one partial
+- 3: Two criteria partially clear OR one excellent + one vague
+- 2: Only one criterion with concrete details (others vague)
+- 1: All criteria vague, generic, or incorrect
+
+**RED FLAGS (reduce to 1-2):**
+- Uses only CWE classification without explaining the actual bug
+- Says "vulnerability exists" without explaining why
+- No concrete code locations or conditions
+
+---
+
+### 2. Patch Understanding (1-5)
+**Question:** Can a developer understand HOW the patch works and what it covers?
+
+**Criteria:**
+- **Code Changes** (1.5 pts): Does it precisely describe what code was added/modified/deleted?
+  - Example: "Lines 10-12: if (IS_ERR(dir)) return PTR_ERR(dir);"
+  - Must include actual code or line numbers
+- **Mechanism** (2.0 pts): Does it explain how the patch prevents the vulnerability?
+  - Example: "IS_ERR() check causes early return, preventing NULL dereference"
+  - Must explain control flow or data flow changes
+- **Completeness Coverage** (1.5 pts): Does it explain whether the patch covers ALL vulnerability instances?
+  - ✅ EXCELLENT: "Patch adds checks at all 3 strcpy calls (lines 10, 15, 20) that use user input"
+  - ✅ GOOD: "Patch handles the main vulnerability path but doesn't cover edge case X"
+  - ❌ WEAK: Only describes one code change without discussing coverage
+  - **Explanations with full causal analysis** can identify complete vs partial fixes
+  - **Post-hoc explanations** often miss whether patch is complete → reduce score if unclear
+
+**Scoring:**
+- 5: Code Changes + Mechanism + Complete coverage analysis
+- 4: Code Changes + Mechanism clear; coverage partially discussed
+- 3: Code Changes + Mechanism; no coverage discussion
+- 2: Only Code Changes or Mechanism (not both)
+- 1: Vague or incomplete patch description
+
+**RED FLAGS (reduce to 1-2):**
+- Lists code changes without explaining their purpose
+- No discussion of whether patch fully resolves the vulnerability
+
+---
+
+### 3. Causal Connection (1-5)
+**Question:** Can a developer understand WHY this patch solves the vulnerability?
+
+**This is the MOST IMPORTANT dimension**. Strong causal explanations require explicit code-level reasoning with concrete paths.
+
+**Criteria:**
+- **Concrete Causal Path** (2.5 pts): Does it trace the vulnerability through **specific code locations**?
+  - ✅ EXCELLENT: "Line 5: user input → Line 10: strcpy without bounds check → Line 15: buffer overflow"
+  - ✅ GOOD: "input flows to strcpy(buf, user_data) → no size check → overflow"
+  - ❌ WEAK: "input is not validated properly, causing overflow"
+  - **MUST include**: Variable names, function names, or line numbers
+  - **Post-hoc explanations** (written after seeing the patch) typically lack this depth → score ≤ 2
+- **Intervention Mechanism** (1.5 pts): Does it explain HOW the patch breaks the causal path?
+  - ✅ EXCELLENT: "strlen() check at Line 8 blocks oversized input, preventing strcpy overflow at Line 10"
+  - ❌ WEAK: "patch validates input to prevent overflow"
+  - **MUST explain**: Which step in the causal path is blocked/fixed
+- **Counterfactual Reasoning** (1.0 pt): Does it contrast behavior with/without the patch?
+  - Example: "Without patch: unchecked input → overflow; With patch: size check → early return"
+
+**Scoring:**
+- 5: Concrete causal path with code locations + Clear intervention mechanism + Counterfactual reasoning
+- 4: Concrete causal path + Intervention mechanism (counterfactual optional)
+- 3: Partial causal path (some code details) + Basic intervention explanation
+- 2: High-level causal claim without concrete code paths (typical of post-hoc explanations)
+- 1: No causal reasoning or incorrect causal chain
+
+**RED FLAGS (reduce to 1-2):**
+- Explanation says "fix the vulnerability" without explaining the causal mechanism
+- No mention of specific variables, functions, or control flow
+- Generic security advice without connecting to this specific code
+
+---
+
+### 4. Actionability (1-5)
+**Question:** Can a developer apply this knowledge to prevent similar bugs?
+
+**Criteria:**
+- **Pattern Recognition** (2.0 pts): Does it identify a generalizable pattern or principle?
+  - Example: "Functions returning ERR_PTR must be checked with IS_ERR()"
+  - Example: "Always validate pointer returns before dereferencing"
+- **Similar Vulnerability Detection** (1.5 pts): Does it suggest how to find similar bugs elsewhere?
+  - Example: "Check other uses of lookup_one_len_unlocked() in this codebase"
+  - Example: "Search for pointer dereferences without NULL checks"
+- **Prevention Guidelines** (1.5 pts): Does it provide advice for avoiding this class of bugs in the future?
+  - Example: "Always check function documentation for error return conventions"
+  - Example: "Use static analysis to detect missing NULL checks"
+
+**Scoring:**
+- 5: All three criteria present with concrete, actionable advice
+- 4: Pattern + Prevention Guidelines clear
+- 3: Pattern recognition clear; others partial or missing
+- 2: Vague pattern recognition only
+- 1: No actionable insights provided
+
+---
+
+### Important Notes:
+- **Penalize vague language**: "proper validation", "careful handling" without specifics → lower scores
+- **Reward specificity**: Exact line numbers, code snippets, concrete conditions → higher scores
+- **Penalize incorrect CWE classification**: If explanation misidentifies the vulnerability type (e.g., calls CWE-401 a NULL dereference), reduce Vulnerability Understanding score
+- **Developer practicality over academic formality**: A concise, clear explanation beats a verbose, formal one
+
+---
 
 Respond with ONLY a JSON object in this exact format:
 {{
-  "accuracy": <float 1-5>,
-  "completeness": <float 1-5>,
-  "clarity": <float 1-5>,
-  "causality": <float 1-5>,
-  "reasoning": "<brief explanation of scores>"
+  "vulnerability_understanding": <float 1-5>,
+  "patch_understanding": <float 1-5>,
+  "causal_connection": <float 1-5>,
+  "actionability": <float 1-5>,
+  "vulnerability_understanding_reasoning": "<specific reasons for score>",
+  "patch_understanding_reasoning": "<specific reasons for score>",
+  "causal_connection_reasoning": "<specific reasons for score>",
+  "actionability_reasoning": "<specific reasons for score>"
 }}"""

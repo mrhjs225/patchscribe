@@ -82,32 +82,74 @@ def _coerce_llm_value(payload: Dict[str, Any], *keys: str) -> Optional[float]:
 
 def normalize_llm_scores(score_data: Dict[str, Any]) -> Dict[str, float]:
     """
-    Ensure all four LLM quality dimensions are present.
-    If completeness is missing, approximate it using the other axes so downstream
-    averages do not become zero simply because the judge omitted the field.
+    Ensure all LLM quality dimensions are present.
+    Supports both old field names (accuracy, completeness, clarity, causality)
+    and new field names (vulnerability_understanding, patch_understanding,
+    causal_connection, actionability).
+
+    If using new field names, they are mapped to old names for backward compatibility.
     """
-    accuracy = _coerce_llm_value(score_data, "accuracy") or 0.0
-    clarity = _coerce_llm_value(score_data, "clarity") or 0.0
-    causality = _coerce_llm_value(score_data, "causality") or 0.0
-    completeness = _coerce_llm_value(score_data, "completeness", "coverage", "completeness_score")
-    if completeness is None:
-        # Use a conservative fallback so completeness stays within observed range.
-        if clarity and causality:
-            completeness = min(clarity, causality)
-        elif clarity or accuracy:
-            completeness = (clarity or accuracy)
-        else:
-            completeness = 0.0
+    # Check if this is new format (developer-centric) or old format
+    has_new_format = any(k in score_data for k in [
+        'vulnerability_understanding',
+        'patch_understanding',
+        'causal_connection',
+        'actionability'
+    ])
 
-    reasoning = score_data.get('reasoning') or score_data.get('reason') or ""
+    if has_new_format:
+        # New format: map to old field names for backward compatibility
+        vulnerability_understanding = _coerce_llm_value(score_data, "vulnerability_understanding") or 0.0
+        patch_understanding = _coerce_llm_value(score_data, "patch_understanding") or 0.0
+        causal_connection = _coerce_llm_value(score_data, "causal_connection") or 0.0
+        actionability = _coerce_llm_value(score_data, "actionability") or 0.0
 
-    return {
-        'accuracy': float(accuracy),
-        'completeness': float(completeness),
-        'clarity': float(clarity),
-        'causality': float(causality),
-        'reasoning': reasoning,
-    }
+        # Collect all reasoning fields
+        reasoning_parts = []
+        for field in ['vulnerability_understanding_reasoning', 'patch_understanding_reasoning',
+                     'causal_connection_reasoning', 'actionability_reasoning']:
+            if field in score_data and score_data[field]:
+                dimension = field.replace('_reasoning', '').replace('_', ' ').title()
+                reasoning_parts.append(f"{dimension}: {score_data[field]}")
+
+        reasoning = "\n".join(reasoning_parts) if reasoning_parts else ""
+
+        return {
+            'vulnerability_understanding': float(vulnerability_understanding),
+            'patch_understanding': float(patch_understanding),
+            'causal_connection': float(causal_connection),
+            'actionability': float(actionability),
+            'reasoning': reasoning,
+            # Also provide old field names for full backward compatibility
+            'accuracy': float(vulnerability_understanding),  # closest mapping
+            'completeness': float(patch_understanding),      # closest mapping
+            'clarity': float(causal_connection),             # closest mapping
+            'causality': float(actionability),               # closest mapping
+        }
+    else:
+        # Old format: keep existing logic
+        accuracy = _coerce_llm_value(score_data, "accuracy") or 0.0
+        clarity = _coerce_llm_value(score_data, "clarity") or 0.0
+        causality = _coerce_llm_value(score_data, "causality") or 0.0
+        completeness = _coerce_llm_value(score_data, "completeness", "coverage", "completeness_score")
+        if completeness is None:
+            # Use a conservative fallback so completeness stays within observed range.
+            if clarity and causality:
+                completeness = min(clarity, causality)
+            elif clarity or accuracy:
+                completeness = (clarity or accuracy)
+            else:
+                completeness = 0.0
+
+        reasoning = score_data.get('reasoning') or score_data.get('reason') or ""
+
+        return {
+            'accuracy': float(accuracy),
+            'completeness': float(completeness),
+            'clarity': float(clarity),
+            'causality': float(causality),
+            'reasoning': reasoning,
+        }
 
 
 # ==================== DATA STRUCTURES ====================

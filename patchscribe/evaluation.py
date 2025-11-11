@@ -449,13 +449,47 @@ class Evaluator:
                 if "llm_scores" not in case_eval.explanation_metrics:
                     case_eval.explanation_metrics["llm_scores"] = {}
 
-                case_eval.explanation_metrics["llm_scores"].update({
-                    "accuracy": float(score_data.get("accuracy", 0)),
-                    "completeness": float(score_data.get("completeness", 0)),
-                    "clarity": float(score_data.get("clarity", 0)),
-                    "causality": float(score_data.get("causality", 0)),
-                    "reasoning": score_data.get("reasoning", ""),
-                })
+                # Support both old and new field names
+                # New format: vulnerability_understanding, patch_understanding, causal_connection, actionability
+                # Old format: accuracy, completeness, clarity, causality
+                has_new_format = any(k in score_data for k in [
+                    'vulnerability_understanding',
+                    'patch_understanding',
+                    'causal_connection',
+                    'actionability'
+                ])
+
+                if has_new_format:
+                    # Collect reasoning from individual fields
+                    reasoning_parts = []
+                    for field in ['vulnerability_understanding_reasoning', 'patch_understanding_reasoning',
+                                 'causal_connection_reasoning', 'actionability_reasoning']:
+                        if field in score_data and score_data[field]:
+                            dimension = field.replace('_reasoning', '').replace('_', ' ').title()
+                            reasoning_parts.append(f"{dimension}: {score_data[field]}")
+                    reasoning = "\n".join(reasoning_parts) if reasoning_parts else score_data.get("reasoning", "")
+
+                    case_eval.explanation_metrics["llm_scores"].update({
+                        "vulnerability_understanding": float(score_data.get("vulnerability_understanding", 0)),
+                        "patch_understanding": float(score_data.get("patch_understanding", 0)),
+                        "causal_connection": float(score_data.get("causal_connection", 0)),
+                        "actionability": float(score_data.get("actionability", 0)),
+                        "reasoning": reasoning,
+                        # Backward compatibility: map to old names
+                        "accuracy": float(score_data.get("vulnerability_understanding", 0)),
+                        "completeness": float(score_data.get("patch_understanding", 0)),
+                        "clarity": float(score_data.get("causal_connection", 0)),
+                        "causality": float(score_data.get("actionability", 0)),
+                    })
+                else:
+                    # Old format
+                    case_eval.explanation_metrics["llm_scores"].update({
+                        "accuracy": float(score_data.get("accuracy", 0)),
+                        "completeness": float(score_data.get("completeness", 0)),
+                        "clarity": float(score_data.get("clarity", 0)),
+                        "causality": float(score_data.get("causality", 0)),
+                        "reasoning": score_data.get("reasoning", ""),
+                    })
                 success_count += 1
             except (json.JSONDecodeError, ValueError, KeyError) as e:
                 print(f"  ⚠️  Failed to parse judge response for case {case_eval.case_id}: {e}")
