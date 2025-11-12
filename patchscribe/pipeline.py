@@ -36,6 +36,7 @@ from .performance import (
     categorize_complexity,
 )
 from .scm import SCMBuilder
+from .spec_builder import build_specification_for_condition, SpecificationLevel
 from .stage1_cache import Stage1Cache, Stage1Data
 from .verification import VerificationResult, Verifier
 
@@ -94,6 +95,19 @@ class PatchScribePipeline:
         self.stage1_cache = Stage1Cache(stage1_cache_dir) if stage1_cache_dir else None
         self.force_stage1_recompute = force_stage1_recompute
 
+    def _map_strategy_to_condition(self) -> str:
+        """Map strategy to condition name (c1-c4)"""
+        mapping = {
+            'minimal': 'c1',
+            'only_natural': 'c1',
+            'natural': 'c2',
+            'formal': 'c3',  # Default to c3
+        }
+        # c4 is distinguished by enable_consistency_check
+        if self.strategy == 'formal' and self.enable_consistency_check:
+            return 'c4'
+        return mapping.get(self.strategy, 'c3')
+
     def run(self, vuln_case: Dict[str, object]) -> PipelineArtifacts:
         program = vuln_case["source"].strip("\n")
         vuln_info = {
@@ -127,11 +141,23 @@ class PatchScribePipeline:
         first_attempt_success: bool | None = None
         
         max_iterations = vuln_case.get("max_iterations", 3)
+
+        # Generate natural context for legacy compatibility and spec_builder
         natural_context = None
         if self.strategy == "formal":
             natural_context = build_prompt_context(pcg, scm, intervention)
         elif self.strategy in {"natural", "only_natural"}:
             natural_context = build_natural_context(pcg, scm, intervention)
+
+        # Generate SpecificationLevel for unified prompt structure (C1-C4)
+        condition = self._map_strategy_to_condition()
+        spec_level = build_specification_for_condition(
+            condition=condition,
+            vuln_case=vuln_case,
+            intervention_spec=intervention,
+            ebug=E_bug,
+            natural_context=natural_context,
+        )
 
         patch_generator = PatchGenerator(
             pcg,
@@ -139,7 +165,8 @@ class PatchScribePipeline:
             vuln_case["vuln_line"],
             vuln_case.get("signature", ""),
             llm_client=self.llm_client,
-            strategy=self.strategy,
+            spec_level=spec_level,  # NEW: Use unified prompt
+            strategy=self.strategy,  # Keep for backward compatibility
             natural_context=natural_context if self.strategy != "minimal" else None,
             prompt_options=self.prompt_options,
         )

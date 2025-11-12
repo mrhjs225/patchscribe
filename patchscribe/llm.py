@@ -294,8 +294,9 @@ class LLMClient:
         vulnerability_signature: str,
         interventions: Iterable[Dict[str, str]],
         *,
-        strategy: str = "formal",
-        natural_context: str | None = None,
+        spec_level: Optional["SpecificationLevel"] = None,  # NEW: Unified prompt
+        strategy: str = "formal",  # Deprecated, kept for compatibility
+        natural_context: str | None = None,  # Deprecated
         prompt_options: PromptOptions | None = None,
     ) -> Optional[str]:
         """Return full patched code text or None if unavailable."""
@@ -310,6 +311,7 @@ class LLMClient:
             natural_context=natural_context,
             provider_hint=provider_hint,
             prompt_options=prompt_options,
+            spec_level=spec_level,  # NEW: Pass spec_level
         )
         content = self._post_chat(
             [
@@ -734,7 +736,7 @@ class LLMClient:
 
     @staticmethod
     def _system_prompt() -> str:
-        return "You are a helpful assistant."
+        return "You are an expert security engineer specializing in vulnerability analysis and secure code patching."
 
     @staticmethod
     def _explanation_system_prompt() -> str:
@@ -849,6 +851,7 @@ class LLMClient:
             )
 
         # LEGACY: Old prompt building logic (for backward compatibility)
+        # TODO: This legacy path should be deprecated. All calls should use spec_level.
         options = prompt_options or PromptOptions()
         spec_lines = [
             "- target_line: {target_line}\n  enforce: {enforce}\n  rationale: {rationale}".format(**item)

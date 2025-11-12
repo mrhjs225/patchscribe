@@ -87,9 +87,28 @@ class SpecificationBuilder:
         else:
             raise ValueError(f"Unknown condition: {condition}")
 
-    def _build_c1(self) -> None:
-        """C1: No specification (baseline)"""
-        return None
+    def _build_c1(self) -> SpecificationLevel:
+        """C1: Minimal baseline - only basic task description
+
+        Provides absolutely minimal information to establish a true baseline.
+        No CWE, no safety properties, no hints - just the basic task.
+        """
+        content = "## Security Task\n\n"
+        content += "Fix the security vulnerability in the provided code.\n\n"
+        content += "**Instructions**:\n"
+        content += "- Identify and fix the vulnerability\n"
+        content += "- Make minimal changes to the code\n"
+        content += "- Preserve existing functionality\n"
+
+        return SpecificationLevel(
+            level='c1',
+            has_cwe_info=False,
+            has_safety_property=False,
+            has_target_locations=False,
+            has_actionable_instructions=False,
+            has_causal_analysis=False,
+            content=content
+        )
 
     def _build_c2(
         self,
@@ -293,6 +312,7 @@ class SpecificationBuilder:
         content_parts.append("✓ Is at least one of **Section 2's intervention points** implemented?")
         content_parts.append("✓ Does it follow the **minimal intervention principle**? (minimize unnecessary changes)")
         content_parts.append("✓ Are there **no side effects** on existing functionality?")
+        content_parts.append("\n**Note**: This is the complete PatchScribe specification (C4) with full causal analysis and detailed implementation guidance.")
 
         # Optional natural context
         if natural_context:

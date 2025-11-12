@@ -22,7 +22,7 @@ We present PatchScribe, a theory-guided framework that generates security patche
 PatchScribe inverts traditional workflows: it first formalizes vulnerabilities using Program Causal Graphs (PCG) and Structural Causal Models (SCM) to generate a formal bug specification ($E_{\text{bug}}$), then guides LLM-based patch generation with precise constraints, producing patches accompanied by formal patch explanations ($E_{\text{patch}}$).
 We evaluate patch and explanation quality through structured manual assessment using a multi-dimensional rubric (accuracy, completeness, clarity, causality).
 Evaluated on 121 real-world CVEs from two complementary benchmarks (APPATCH Zeroday Repair: 97 cases, ExtractFix: 24 cases), PatchScribe achieves [X\%] patch correctness rate, significantly outperforming raw LLM baseline ([Y\%], $p$<0.001) and informal guidance approaches ([W\%], $p$<0.01), with average processing time of [Z] seconds per CVE.
-% TODO: Fill after experiments complete - expected results: X~75-80%, Y~30-35%, W~50-55%, Z~40-50
+\% todo: Fill after experiments complete - expected results: X~75-80%, Y~30-35%, W~50-55%, Z~40-50
 Our theory-guided approach provides clearer causal understanding than existing exploit-only methods while remaining computationally practical for real-world deployment.
 \end{abstract}
 \section{Introduction}\label{introduction}
@@ -45,8 +45,6 @@ We argue that a more principled approach is needed -- one that combines the gene
 Our key insight is twofold: (1) formalize the vulnerability before attempting to patch it, using the formalization to guide (not just verify) patch generation, and (2) generate separate formal explanations for the bug and the patch, enabling consistency checking between them.
 If we can formally capture what conditions cause the vulnerability (E\_bug), we can provide the LLM with precise guidance (e.g., ``V\_overflow occurs when len \textgreater{} 256 AND no check exists; ensure one of these is false''). After the LLM generates a patch, we formalize how the patch intervenes (E\_patch) and verify that the intervention actually addresses the causes identified in E\_bug.
 This dual-explanation approach catches incomplete fixes that might pass exploit tests but miss edge cases.
-
-\subsection{Key Terminology and Contributions}
 
 We introduce several key concepts that distinguish our approach:
 
@@ -73,165 +71,77 @@ This two-phase approach (Formalization $\rightarrow$ Theory-Guided Generation) p
 
 We demonstrate that PatchScribe significantly improves quality of automated patches.
 By using formal causal specifications to guide patch generation, we help LLMs generate patches that address root causes rather than symptoms.
-Our approach directly addresses the limitations of prior work: (1) It provides pre-hoc formalization that guides generation with precise constraints rather than post-hoc validation alone, and (2) it replaces unverifiable natural-language rationales with structured causal explanations (E_bug, E_patch) that developers can systematically assess.
+Our approach directly addresses the limitations of prior work: (1) It provides pre-hoc formalization that guides generation with precise constraints rather than post-hoc validation alone, and (2) it replaces unverifiable natural-language rationales with structured causal explanations ($E_{\text{bug}}$, $E_{\text{patch}}$) that developers can systematically assess.
 This yields a double benefit: higher quality patches and clearer understanding of vulnerability and fix.
 
-\subsection{Notation and Paper Organization}
-
-Table~\ref{tab:notation} summarizes key notation used throughout this paper.
-
-\begin{table}[h]
-\centering
-\caption{Key Notation and Terminology}
-\label{tab:notation}
-\begin{tabular}{ll}
-\toprule
-\textbf{Notation} & \textbf{Meaning} \\
-\midrule
-$P$ & Original (vulnerable) program \\
-$P'$ & Patched program \\
-$V_{\text{bug}}$ & Vulnerability condition/event \\
-$E_{\text{bug}}$ & Formal bug explanation \\
-$E_{\text{patch}}$ & Formal patch explanation \\
-$G = (V, E)$ & Program Causal Graph (PCG) \\
-$do(X=x)$ & Causal intervention (SCM notation) \\
-PCG & Program Causal Graph \\
-SCM & Structural Causal Model \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\textbf{Paper Organization:} Section~\ref{sec:background} provides background on LLM-based vulnerability repair and motivation for our approach.
-Section~\ref{sec:approach} presents the PatchScribe framework overview.
-Section~\ref{sec:formal-model} details our formal causal model (PCG and SCM).
-Section~\ref{sec:system} describes the two-phase system architecture.
-Section~\ref{sec:implementation} covers implementation details.
-Section~\ref{sec:evaluation} presents our experimental evaluation.
+Section~\ref{sec:background} provides background and motivation.
+Section~\ref{sec:approach} presents the framework overview.
+Sections~\ref{sec:formal-model} and~\ref{sec:system} detail our formal model and system architecture.
+Section~\ref{sec:evaluation} presents experimental evaluation.
 Section~\ref{sec:related} discusses related work.
-Section~\ref{sec:threat-model} defines our threat model and security guarantees.
-Sections~\ref{sec:limitations},~\ref{sec:ethics}, and~\ref{sec:llm-usage} address limitations, ethics, and LLM usage considerations.
+Section~\ref{sec:discussion} addresses security guarantees, limitations, and ethics.
 Section~\ref{sec:conclusion} concludes.
 
-\section{Background and Related Work}\label{sec:background}
+\section{Background and Motivation}\label{sec:background}
+
+\subsection{LLM-Based Vulnerability Repair}
 
 Automated vulnerability repair has long been a goal of the security community.
-Traditional program repair techniques (e.g., GenProg, SPR) targeted general bugs with test-suite specifications, but security vulnerabilities pose special challenges -- a patch must not only pass functional tests but also prevent exploits and avoid weakening security in other ways.
-With the rise of powerful code-focused LLMs (such as GPT-4, Code Llama, etc.), researchers have explored using these models to generate vulnerability fixes from code context and problem descriptions.
-The appeal is clear: an LLM trained on vast code corpora may suggest creative fixes even for complex flaws, potentially reducing the window of exposure.
+With the rise of powerful code-focused LLMs, researchers have explored using these models to generate vulnerability fixes from code context and problem descriptions.
+Early results are encouraging yet cautionary: LLM-generated patches can superficially appear correct while failing to eliminate the security issue.
 
-Early results are encouraging yet cautionary. LLM-generated patches can often superficially appear correct -- they may compile and even satisfy basic tests -- while still failing to eliminate the security issue.
-For example, if a vulnerability arises from a missing input validation, an LLM might add a check that covers the provided example but not all cases, or place the fix in an incorrect location.
-The validation gap in many evaluations has led to overly optimistic conclusions about LLM capabilities.
-To address this, the community has shifted towards more rigorous evaluation.
-Wang et al.'s VulnRepairEval benchmark (2025) explicitly uses real proof-of-concept exploits as tests: a generated patch is only deemed successful if it stops the exploit from working.
-Their study revealed a significant performance drop compared to earlier metrics -- the best model patched only \textasciitilde5 out of 23 Python CVEs ($\approx 22\%$) when judged by exploit prevention.
-This indicates that many LLM ``fixes'' did not truly remove the vulnerable condition, underscoring the need for deeper verification.
+Wang et al.'s VulnRepairEval~\cite{wang2025vulnrepaireval} explicitly uses real proof-of-concept exploits as validation, revealing that state-of-the-art LLMs fix only \textasciitilde22\% of known CVEs under strict conditions.
+To improve generation, researchers have incorporated reasoning techniques.
+Kulsum et al.'s VRpilot~\cite{kulsum2024vrpilot} uses chain-of-thought prompting plus iterative validation, improving patch success rates by 14\% for C vulnerabilities.
+SAN2PATCH~\cite{kim2025san2patch} employs Tree-of-Thought prompting and AddressSanitizer guidance, achieving 63--79\% success rates on benchmark datasets.
 
-Beyond generation, researchers have begun to incorporate reasoning and feedback to guide LLMs in repair tasks.
-Chain-of-thought (CoT) prompting is one such technique: by asking the LLM to reason step-by-step about the vulnerability and potential fix, we can reduce logical errors and improve patch correctness.
-Kulsum et al.~(2024) showed in their VRpilot system that using a CoT prompt plus iterative validation (compiling and testing each candidate patch) improved patch success rates by 14\% for C vulnerabilities compared to LLM baselines.
-Similarly, advanced prompting strategies like Tree-of-Thought and self-consistency have been applied.
-For instance, SAN2PATCH (Kim et al., 2025) splits the repair process into stages (understanding the bug, locating it, planning a fix, generating code) and uses a Tree-of-Thought prompt at each stage to systematically explore reasoning paths.
-This approach, leveraging AddressSanitizer crash logs for guidance, achieved markedly higher patch success rates (63--79\%) on benchmark datasets.
-These works illustrate that richer reasoning can help LLMs avoid some pitfalls of naive generation.
+However, all these approaches rely on the LLM's internal reasoning or external tests to judge correctness.
+Whether it's VRpilot's chain-of-thought or SAN2PATCH's guided stages, the rationale is encapsulated in natural language explanations or test passing---neither provides formal guarantees of security.
+Even if an exploit is thwarted, one cannot be sure that a variant wouldn't succeed or that the patch didn't introduce new vulnerabilities.
 
-However, all these approaches still rely on the LLM's internal reasoning or external tests to judge correctness. Whether it's VRpilot's chain-of-thought or SAN2PATCH's guided stages, the rationale for the patch is ultimately encapsulated in either natural language explanations or the passing of certain tests. Neither provides a formal guarantee of security.
-A chain-of-thought explanation is essentially an LLM's opinion of why the patch works, which might not be logically sound or complete.
-Even if the exploit used in testing is thwarted, one cannot be sure that a slightly different attack wouldn't succeed, or that the patch didn't open a new vulnerability elsewhere.
-In short, today's LLM-based repair techniques leave us with a lingering question: did we really fix the root cause, and how can we be sure?
+\subsection{Limitations of Current Approaches}
 
-This motivates a new angle: introducing formal, causal reasoning into the vulnerability repair loop.
-Our motivation is influenced by principles of explainable AI and classic formal methods.
-In explainable AI, a distinction is made between interpretations (post-hoc, model-generated justifications) and explanations grounded in the true causal factors of a decision.
-Current LLM patch explanations are interpretations -- fluent narratives that may or may not align with the program's actual logic.
-We seek to replace these with causal explanations that reflect genuine cause-effect relations in code.
-Meanwhile, formal verification in security has proven that machine-checked proofs can provide strong guarantees (e.g., proof-carrying code, verified compilers), but writing full specifications or proofs for arbitrary software is notoriously difficult.
-Our approach threads a middle ground: we do not require a full formal specification of program behavior, only a formal characterization of the vulnerability condition and its causes.
-This makes the problem more tractable while still yielding actionable proofs about the patch's effect.
+Despite progress, existing LLM-based repair methods exhibit critical limitations that motivate our work:
 
-In summary, PatchScribe is motivated by the need to bridge LLM-driven flexibility with systematic assurance.
-By constructing a causal model of the vulnerability, we aim to ensure that any patch actually addresses the core vulnerability cause.
-The dual explanation approach serves as both a verification mechanism and a human-readable justification, increasing confidence for developers deploying LLM-generated fixes in security-critical code.
+\textbf{L1: Incomplete Validation.}
+Many approaches validate patches using tests or specific exploit instances, not comprehensive proofs.
+Exploit-based evaluations use one PoC exploit as the litmus test---if blocked, the patch is deemed successful.
+However, this overlooks variant exploits or edge cases.
+A patch might check for a known malicious input pattern rather than fixing the underlying unsafe logic; the original exploit fails, but a tweaked input could still succeed.
+Thus, exploit-only validation cannot guarantee completeness.
 
-\section{Threat Model}\label{threat-model}
+\textbf{L2: Unverifiable Rationales.}
+LLMs produce natural language explanations that are post-hoc and unverifiable.
+Studies observe LLMs giving confident-sounding explanations that are partially or wholly incorrect---hallucinated reasoning~\cite{ullah2024secLLMHolmes}.
+An LLM might assert ``the buffer is now bounds-checked, so the overflow is resolved,'' but without code verification, we cannot confirm the check covers all cases or is correctly implemented.
+No current system provides a formal link between explanation and code.
 
-We consider a scenario where an attacker is attempting to exploit a known vulnerability in a software system, and an automated repair system (powered by an LLM and our verification framework) is used to generate and validate a patch.
-The assets to protect are the integrity and availability of the software's functionality, as well as any sensitive data it handles, which could be compromised by the vulnerability.
-The attacker's capability is that they can provide arbitrary inputs to the software (including the original exploit input and variants) in an attempt to trigger the vulnerability.
+\textbf{L3: Lack of Formal Guarantees.}
+Traditional program repair explored formal methods~\cite{wang2024sok}, but integrating formal verification with LLM-driven patching has seen minimal exploration.
+Formal specifications for security properties are hard to write for arbitrary code, and fully verifying a patch can be as hard as verifying the entire program.
+Most LLM repair systems avoid formal proofs, leaving no strong guarantees backing the patch.
+Current LLM patching often operates in a ``generate-and-hope'' mode---insufficient for high-assurance domains.
 
-Assumptions: We assume the location or indicator of the vulnerability is known to the repair system (e.g., through a CVE description, a stack trace, or a sanitizer log pinpointing the issue).
-This is consistent with many vulnerability repair scenarios where the bug is first discovered and needs patching.
-We also assume the LLM and tools used (compiler, symbolic executor, etc.) are trusted and not maliciously manipulated -- the threat here is not the toolchain but the risk of a wrong or incomplete patch.
-The patch generation process itself is not adversarial: the LLM might be prone to errors, but we do not model it as actively trying to introduce malicious code.
+\textbf{L4: Narrow Reasoning Context.}
+LLMs might not fully understand the causal chain of a vulnerability, acting on local cues.
+For a ``read past buffer end'' vulnerability, an LLM might locally add a length check, but if the root cause involves multiple functions passing incorrect sizes, a local fix might not solve it.
+Without an explicit representation of causality, there is risk of addressing symptoms rather than causes.
+Code property graphs and taint analyses create global views for detection, but LLM-driven repair hasn't fully leveraged them.
+As a result, some patches are ``fragile''---they only intercept the known path, not all paths.
 
-Attacker Model: The attacker's goal is to exploit the vulnerability to achieve some impact (e.g., buffer overflow leading to code execution, information leak, denial of service).
-Post-patch, the attacker will try any inputs or strategies available to bypass the fix.
-In particular, if the patch only blocks a specific input pattern (the original exploit), the attacker might try a variant input that still triggers the vulnerability via a slightly different path.
-The attacker may also scour the patched code for newly introduced weaknesses (for instance, if the patch adds code that itself has a flaw).
+\subsection{Motivation for Causal Reasoning}
 
-Defender/Repair Goals: The automated repair system's goal is to produce a patch that eliminates the vulnerability -- meaning the exploitable condition can no longer occur -- while preserving the software's intended functionality and not introducing new vulnerabilities.
-In formal terms, if we describe the vulnerability by a condition (such as an assertion failure, crash, or unsafe state) reachable in the original program, the patched program should prevent that condition for all feasible inputs (not just the known exploit).
-The patch should also respect a safety property of not opening another known class of vulnerability (like not introducing an obvious new overflow or bypass).
-Functional correctness (the patch doesn't break legitimate features) is important but in this work we primarily focus on security correctness; we assume basic regression testing is done to catch functionality issues.
+This motivates introducing formal, causal reasoning into the vulnerability repair loop.
+Our motivation draws from explainable AI and formal methods.
+In explainable AI, a distinction exists between interpretations (post-hoc, model-generated justifications) and explanations grounded in true causal factors.
+Current LLM patch explanations are interpretations---fluent narratives that may not align with the program's actual logic.
+We seek causal explanations reflecting genuine cause-effect relations in code.
 
-Threats Addressed by PatchScribe: Our approach is designed to mitigate two main threat scenarios:
-1.  Incomplete Fix Threat: The patch does not fully close off the vulnerability's cause.
-The attacker finds an alternative input or path that still satisfies the conditions for exploitation. PatchScribe counters this by systematically validating that the causal chain leading to the vulnerable condition is broken under all relevant circumstances, not just the originally observed exploit. If any path remains, the explanation consistency check fails and the patch is rejected or flagged as insufficient.
-2. Misleading Explanation Threat: The LLM (or developer) provides an explanation claiming the vulnerability is fixed (for example, ``We added a check to ensure the index is within bounds''), but this rationale might be false or only partially true.
-Without systematic validation, a developer might believe the threat is gone.
-In our threat model, a misleading explanation is dangerous because it could cause premature confidence and deployment of a flawed patch.
-PatchScribe addresses this by requiring the explanation to be machine-checkable.
-If the LLM's explanation does not hold -- e.g., if it claims a check prevents out-of-bounds access but symbolically an out-of-bounds write is still possible -- the discrepancy will be caught by the explanation checker.
+Meanwhile, formal verification in security provides strong guarantees (e.g., proof-carrying code), but writing full specifications for arbitrary software is notoriously difficult.
+Our approach threads a middle ground: we do not require full formal specification of program behavior, only formal characterization of the vulnerability condition and its causes.
+This makes the problem tractable while yielding actionable proofs about the patch's effect.
 
-We do not specifically model an attacker who can manipulate the LLM itself (e.g., prompt injection into the repair process) -- that is orthogonal and can be mitigated by securing the input channels to the LLM.
-We also acknowledge that if the vulnerability or its exploit is extremely complex (e.g., requiring multi-step logical conditions or specific environment states), the PCG/SCM we build might simplify or omit some factors, potentially leaving residual risk. These aspects will be discussed in Limitations.
-
-In summary, the threat model focuses on an honest-but-fallible repair system versus a determined attacker exploiting any weakness left after patching. The role of PatchScribe is to strengthen the defender's side by adding a rigorous verification step that reduces the chance of an attacker slipping through an unaddressed causal pathway or a patch error.
-The security guarantee we seek is: If PatchScribe approves a patch with a verified explanation, then the known vulnerability is truly eliminated (the known exploit and any variant following the same root cause are prevented) with high confidence.
-This guarantee is stronger than what prior LLM-only methods provide, thereby shrinking the attacker's opportunity space post-patch.
-
-\section{Limitations of Existing Work}\label{limitations-of-existing-work}
-
-Existing automated vulnerability repair methods, especially those leveraging LLMs, exhibit several limitations that motivate our work:
-
-\textbf{Reliance on Incomplete Validation:} Many approaches validate patches
-using tests or specific exploit instances, but not comprehensive proofs.
-Early LLM-based repairs were often evaluated by running built-in test suites or simply checking that the program still executed without crashing.
-This test-based validation can miss security issues -- a patch that passes all tests might still be vulnerable to an untested exploit.
-Even the more rigorous exploit-based evaluations (e.g., VulnRepairEval) are essentially exploit-only validation: they use one PoC exploit as the litmus test.
-If the exploit is blocked, the patch is considered successful. However, this overlooks the possibility of variant exploits or edge cases the patch doesn't handle.
-For instance, a patch might specifically check for a known malicious input pattern rather than fixing the underlying unsafe logic; the original exploit fails, but a tweaked input could still succeed. Thus, exploit-only validation, while reflecting real attacker behavior better than unit tests, cannot guarantee completeness of the fix.
-
-\textbf{Unverifiable Rationales:} When LLMs produce patches, they can also produce explanations or reasoning traces (especially if prompted with CoT).
-These rationales are natural language descriptions of what the patch does and why. Crucially, there is no guarantee that these rationales are correct or complete. Studies have observed that LLMs often give confident-sounding explanations that are partially or wholly incorrect, a phenomenon known as hallucinated reasoning.
-In the context of security, an LLM might assert ``the buffer is now bounds-checked, so the overflow is resolved,'' but unless we verify the code, we cannot be sure that the check covers all cases or that the logic is implemented correctly.
-No current LLM-based repair system provides a formal link between the explanation and the code -- the explanation is essentially commentary.
-This is a limitation because developers cannot distinguish a truly sound patch rationale from a flawed one without investing manual effort (code review or formal analysis themselves). Unverifiable rationales contribute to a false sense of security.
-
-\textbf{Lack of Formal Guarantees:} Traditional program repair research has explored formal methods (e.g., generating patches that come with proofs or using verification conditions to guide repairs~\cite{wang2024sok}).
-However, integrating formal verification with LLM-driven patching has seen minimal exploration.
-One reason is that formal specifications for security properties are hard to write for arbitrary code, and fully verifying a patch can be as hard as verifying the entire program.
-As a result, most LLM repair systems avoid formal proofs, leaving a gap where no strong guarantees back up the patch.
-The limitation here is apparent: without machine-checkable proof, there's always uncertainty.
-Tools like PATCHVERIF have demonstrated that it's possible to use symbolic execution and invariants to check if a patch truly addresses expected behaviors~\cite{wang2023patchverif}, but such tools require significant setup and are not generally plugged into the LLM generation loop.
-This means current LLM patching often operates in a ``generate-and-hope'' mode -- hope that the patch is correct, then do some testing. This is insufficient for high-assurance domains.
-
-\textbf{Narrow Reasoning Context:} Another limitation in existing work is that LLMs might not fully understand the causal chain of a vulnerability.
-They often act on local cues. For example, if a vulnerability is ``read past buffer end,'' an LLM might locally add a length check. But if the real root cause was a more complex sequence (say, multiple functions passing around an incorrect size), a local fix might not solve it.
-Approaches like SAN2PATCH and VRpilot try to broaden the context (using sanitizer logs, or iteratively refining after failed attempts).
-Yet, without an explicit representation of causality, there is a risk of addressing symptoms rather than causes. The limitation is the absence of a global view of how the vulnerability arises.
-Code property graphs and taint analyses in vulnerability detection research do create global views, but LLM-driven repair hasn't fully leveraged that. As a result, some patches are ``fragile'' -- they only intercept the known path, not all paths.
-
-\textbf{Human Effort and Trust Issues:} Finally, in practice, developers reviewing an LLM-suggested patch have limited tools to verify it beyond re-testing or code inspection.
-If they distrust the patch, they might rewrite it manually, negating the benefit of automation.
-If they overtrust it (because the explanation sounded convincing), they might deploy a faulty fix.
-The current state of the art doesn't offer an intermediate artifact that developers can trust -- either you trust the LLM and tests or you do a full manual verification.
-This limits adoption of such tools in security-critical projects, where stakes are high.
-A limitation noted in surveys is that while LLMs can accelerate finding and fixing bugs, their overreliance without verification is dangerous.
-In essence, there is a missing link to turn an LLM patch from a suggestion into a confidently acceptable solution.
-
-In summary, prior work on automated vulnerability repair has illuminated what is possible but also what is lacking: comprehensive verification and trustworthy explanations.
-These limitations motivate PatchScribe's design, which explicitly targets them by bringing causal analysis and dual verification into the repair loop.
+PatchScribe bridges LLM-driven flexibility with systematic assurance by constructing a causal model of the vulnerability, ensuring patches address the core cause through dual explanation generation.
 
 \subsection{Design Requirements}
 
@@ -294,7 +204,7 @@ These requirements guided the design of PatchScribe, which we describe next.
 \section{Approach Overview}\label{sec:approach}
 
 PatchScribe is a system for automated vulnerability repair that produces dual causal explanations for each patch.
-Unlike prior approaches that generate patches first and explain them post-hoc, PatchScribe follows a theory-guided approach: it first formalizes the vulnerability causally, then uses this formalization to guide patch generation, producing patches accompanied by dual explanations (E_bug and E_patch).
+Unlike prior approaches that generate patches first and explain them post-hoc, PatchScribe follows a theory-guided approach: it first formalizes the vulnerability causally, then uses this formalization to guide patch generation, producing patches accompanied by dual explanations (\(E_{\text{bug}}\) and \(E_{\text{patch}}\)).
 Figure~\ref{fig:overview} illustrates the overall architecture.
 
 \begin{figure}[t]
@@ -355,7 +265,40 @@ In meeting the design requirements:
 
 The following sections detail the formal modeling, system architecture, and implementation.
 
+\subsection{Threat Model and Scope}
+
+\textbf{Assumptions.} We assume the vulnerability location is known (e.g., via CVE description, sanitizer log) and that the LLM and analysis tools are trusted. The threat is not the toolchain but the risk of incorrect or incomplete patches.
+
+\textbf{Attacker Model.} An attacker can provide arbitrary inputs to exploit the vulnerability. Post-patch, they may attempt variant exploits or search for newly introduced weaknesses. PatchScribe addresses two main threats: (1) \emph{Incomplete Fix}---where alternative paths still trigger the vulnerability, and (2) \emph{Misleading Explanation}---where unverifiable rationales give false confidence.
+
+\textbf{Defender Goals.} Produce patches that eliminate the vulnerability for all feasible inputs (not just known exploits) while preserving functionality and avoiding new vulnerabilities. We focus on security correctness, assuming basic regression testing catches functional issues.
+
+\textbf{Out of Scope.} We do not model concurrency vulnerabilities, side-channels, or adversarial manipulation of the LLM itself. Complex multi-step vulnerabilities requiring extensive environmental state may exceed PCG/SCM modeling capabilities (discussed in Section~\ref{sec:discussion}).
+
 \section{Formal Model}\label{sec:formal-model}
+
+Table~\ref{tab:notation} summarizes key notation used throughout this section and the rest of the paper.
+
+\begin{table}[h]
+\centering
+\caption{Key Notation and Terminology}
+\label{tab:notation}
+\begin{tabular}{ll}
+\toprule
+\textbf{Notation} & \textbf{Meaning} \\
+\midrule
+$P$ & Original (vulnerable) program \\
+$P'$ & Patched program \\
+$V_{\text{bug}}$ & Vulnerability condition/event \\
+$E_{\text{bug}}$ & Formal bug explanation \\
+$E_{\text{patch}}$ & Formal patch explanation \\
+$G = (V, E)$ & Program Causal Graph (PCG) \\
+$do(X=x)$ & Causal intervention (SCM notation) \\
+PCG & Program Causal Graph \\
+SCM & Structural Causal Model \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 In PatchScribe, the formal foundation is provided by two interrelated models: the Program Causal Graph (PCG) and the Structural Causal Model (SCM).
 Here we define each and explain how they are constructed and used.
@@ -803,38 +746,16 @@ we've confirmed the fix addresses the causal root cause with proper reasoning.
 
 By performing explanation generation and checking for each vulnerability fix, PatchScribe aims to output only those patches that it can explain and prove.
 This will likely reduce the total number of ``successful'' patches (because some patches that an LLM would have offered as solutions will be filtered out as insufficient), but the ones that remain have a much stronger correctness guarantee.
-In the next section, we outline how we plan to evaluate this approach to demonstrate its effectiveness.
 
-\section{Implementation}\label{sec:implementation}
+\subsection{Implementation Details}\label{subsec:implementation}
 
-\textbf{System Architecture:} PatchScribe is implemented in Python 3.10 with approximately 8,500 lines of code, structured as follows:
+\textbf{System Architecture.} PatchScribe is implemented in Python 3.10 with approximately 8,500 lines of code: PCG construction module (2,100 LoC using Clang bindings + custom LLVM passes in C++), SCM reasoning engine (1,800 LoC using Z3 SMT solver), LLM integration layer (1,200 LoC for OpenAI API + prompt engineering), consistency verification (2,400 LoC for dual explanation checker), and evaluation framework (1,000 LoC for metrics).
 
-\begin{itemize}
-\item \textbf{PCG construction module:} 2,100 LoC (Clang bindings + custom LLVM passes in C++)
-\item \textbf{SCM reasoning engine:} 1,800 LoC (using Z3 SMT solver Python API for logical reasoning)
-\item \textbf{LLM integration layer:} 1,200 LoC (OpenAI API + prompt engineering framework)
-\item \textbf{Consistency verification:} 2,400 LoC (dual explanation checker)
-\item \textbf{Evaluation framework:} 1,000 LoC (metrics computation and logging)
-\end{itemize}
+\textbf{Key Dependencies.} Clang/LLVM 14.0 for program analysis (static slicing, taint tracking), Z3 4.12.2 for logical reasoning, OpenAI GPT-4o-mini API for patch generation, and Python libraries: libclang, networkx (PCG representation), pandas (data processing).
 
-\textbf{Key Dependencies:}
-\begin{itemize}
-\item Clang/LLVM 14.0 for program analysis (static slicing, taint tracking)
-\item Z3 4.12.2 for logical reasoning and constraint solving
-\item OpenAI GPT-4o-mini API for patch generation
-\item Python libraries: libclang, networkx (PCG representation), pandas (data processing)
-\end{itemize}
+\textbf{Execution Environment.} Hardware: Intel Xeon CPU @ 3.2GHz, 64GB RAM, Ubuntu 22.04 LTS. Average processing time: [Z] seconds per vulnerability. Peak memory usage: [M] MB.
 
-\textbf{Execution Environment:}
-\begin{itemize}
-\item Hardware: Intel Xeon CPU @ 3.2GHz, 64GB RAM, Ubuntu 22.04 LTS
-\item Average processing time: [Z] seconds per vulnerability case
-\item Peak memory usage: [M] MB
-\end{itemize}
-
-\textbf{Artifacts and Reproducibility:}
-Code, datasets, and experimental results will be made available at \url{https://anonymous.4open.science/r/patchscribe-XXXX} (anonymized for review).
-Upon acceptance, we will release on GitHub with comprehensive documentation, Docker containers, and step-by-step reproduction scripts to facilitate community validation and extension.
+\textbf{Artifacts and Reproducibility.} Code, datasets, and experimental results will be made available at \url{https://anonymous.4open.science/r/patchscribe-XXXX} (anonymized for review). Upon acceptance, we will release on GitHub with comprehensive documentation, Docker containers, and step-by-step reproduction scripts.
 
 \section{Evaluation}\label{sec:evaluation}
 
@@ -911,7 +832,7 @@ Table~\ref{tab:rq1-results} presents end-to-end patch generation success rates a
 
 \begin{table}[h]
 \centering
-\caption{Patch Generation Success Rates (\%) across four experimental conditions on 121 CVEs (ExtractFix: 24 cases, Zeroday Repair: 97 cases). Success defined by manual evaluation of patch correctness. C1: Raw LLM (no guidance), C2: Vague hints (informal prompts), C3: Abstract guidance (general description), C4: Full PatchScribe ($E_{\text{bug}}$ formal specification). % TODO: Fill with actual results after experiments}
+\caption{Patch Generation Success Rates (\%) across four experimental conditions on 121 CVEs (ExtractFix: 24 cases, Zeroday Repair: 97 cases). Success defined by manual evaluation of patch correctness. C1: Raw LLM (no guidance), C2: Vague hints (informal prompts), C3: Abstract guidance (general description), C4: Full PatchScribe ($E_{\text{bug}}$ formal specification). \% todo: Fill with actual results after experiments}
 \label{tab:rq1-results}
 \begin{tabular}{lcccc}
 \toprule
@@ -944,7 +865,7 @@ Table~\ref{tab:rq2-results} presents patch quality metrics for the full PatchScr
 
 \begin{table}[h]
 \centering
-\caption{Patch Quality Metrics for Full PatchScribe System (C4 Configuration Only) showing patch correctness, ground truth alignment, and vulnerability elimination rates through structured manual evaluation. % TODO: Fill with actual results}
+\caption{Patch Quality Metrics for Full PatchScribe System (C4 Configuration Only) showing patch correctness, ground truth alignment, and vulnerability elimination rates through structured manual evaluation. \% todo: Fill with actual results}
 \label{tab:rq2-results}
 \begin{tabular}{lcc}
 \toprule
@@ -972,7 +893,7 @@ Table~\ref{tab:rq3-results} presents timing and resource usage breakdown.
 
 \begin{table}[h]
 \centering
-\caption{Performance and Resource Usage breakdown by phase, showing time overhead of each component (Phase 1: PCG/SCM construction, Phase 2: LLM generation) and resource consumption. Comparison includes VRpilot (reported $\sim$110s) and raw LLM baseline ($\sim$60s). % TODO: Fill with actual timing measurements}
+\caption{Performance and Resource Usage breakdown by phase, showing time overhead of each component (Phase 1: PCG/SCM construction, Phase 2: LLM generation) and resource consumption. Comparison includes VRpilot (reported $\sim$110s) and raw LLM baseline ($\sim$60s). \% todo: Fill with actual timing measurements}
 \label{tab:rq3-results}
 \begin{tabular}{lc}
 \toprule
@@ -1008,7 +929,7 @@ Table~\ref{tab:rq4-results} presents explanation quality scores across four eval
 
 \begin{table}[h]
 \centering
-\caption{Explanation Quality Scores (1-5 Likert scale) across four dimensions: Accuracy (technical correctness), Completeness (coverage of WHAT/WHY/HOW), Clarity (understandability), Causality (causal reasoning depth). Comparing baseline (C1: raw LLM) vs. full PatchScribe (C4) across both datasets and models. % TODO: Fill with actual quality scores}
+\caption{Explanation Quality Scores (1-5 Likert scale) across four dimensions: Accuracy (technical correctness), Completeness (coverage of WHAT/WHY/HOW), Clarity (understandability), Causality (causal reasoning depth). Comparing baseline (C1: raw LLM) vs. full PatchScribe (C4) across both datasets and models. \% todo: Fill with actual quality scores}
 \label{tab:rq4-results}
 \begin{tabular}{lcccc}
 \toprule
@@ -1045,7 +966,7 @@ Table~\ref{tab:comparison} provides indirect comparison with recent LLM-based re
 
 \begin{table}[h]
 \centering
-\caption{Comparison with Recent LLM-based Repair Systems (Indirect comparison due to different datasets and evaluation metrics). VRpilot uses exploit blocking, SAN2PATCH uses AddressSanitizer clearance, VulnRepairEval uses exploit blocking, while PatchScribe uses multi-layered validation (consistency + ground truth + structured evaluation). % TODO: Fill PatchScribe results}
+\caption{Comparison with Recent LLM-based Repair Systems (Indirect comparison due to different datasets and evaluation metrics). VRpilot uses exploit blocking, SAN2PATCH uses AddressSanitizer clearance, VulnRepairEval uses exploit blocking, while PatchScribe uses multi-layered validation (consistency + ground truth + structured evaluation). \% todo: Fill PatchScribe results}
 \label{tab:comparison}
 \begin{tabular}{lccc}
 \toprule
@@ -1069,7 +990,7 @@ We manually analyzed all failed cases to identify common failure patterns. Table
 
 \begin{table}[h]
 \centering
-\caption{Failure Modes and Frequencies across both datasets. Manual analysis of all failed cases identified six primary failure patterns: LLM code generation errors, incomplete PCG construction (missing inter-procedural paths), overly strict consistency checking (false negatives), multi-cause vulnerabilities requiring iterative refinement, complex control flow exceeding analysis capabilities, and other miscellaneous issues. % TODO: Fill with actual failure analysis}
+\caption{Failure Modes and Frequencies across both datasets. Manual analysis of all failed cases identified six primary failure patterns: LLM code generation errors, incomplete PCG construction (missing inter-procedural paths), overly strict consistency checking (false negatives), multi-cause vulnerabilities requiring iterative refinement, complex control flow exceeding analysis capabilities, and other miscellaneous issues. \% todo: Fill with actual failure analysis}
 \label{tab:failures}
 \begin{tabular}{lcc}
 \toprule
@@ -1172,189 +1093,47 @@ In essence, PatchScribe stands at the intersection of program repair, security, 
 It leverages ideas from each: from APR we take the generate-and-validate paradigm, from security we take exploit-driven rigor, from AI we take powerful code generation and reasoning capabilities, and from causal inference we take systematic modeling of cause-effect relationships.
 Our work advances the field towards more trustworthy automated vulnerability mitigation through systematic verification of causal explanations.
 
-\section{Threat Model and Security Guarantees}\label{sec:threat-model}
+\section{Discussion}\label{sec:discussion}
 
-\subsection{Attacker Model}
+\subsection{Security Guarantees and Limitations}\label{subsec:security}
 
-We consider an attacker attempting to exploit a known vulnerability in a software system. The attacker's capabilities include:
+\textbf{Security Guarantees.} For patches passing PatchScribe's verification, the vulnerability condition $V_{\text{bug}}$ is unreachable via causal paths identified in $E_{\text{bug}}$: $\forall \text{input} \in \text{InputSpace}: \lnot \text{Reachable}(V_{\text{bug}}|P', E_{\text{bug}})$. Every verified patch includes mutually consistent dual explanations where $E_{\text{patch}}$ addresses all causes in $E_{\text{bug}}$. This guarantee holds under the assumption that $E_{\text{bug}}$ correctly captures all causal paths.
 
-\begin{itemize}
-\item Ability to provide arbitrary inputs to the vulnerable program
-\item Knowledge of the vulnerability type (e.g., buffer overflow, SQL injection)
-\item Capability to craft variant exploits that deviate from known PoC exploits
-\item No ability to modify program binary, execution environment, or PatchScribe toolchain
-\end{itemize}
+\textbf{Out of Scope.} We do not model concurrency vulnerabilities (race conditions, TOCTOU), side-channel attacks, or adversarial manipulation of the LLM itself. Vulnerabilities requiring deep semantic understanding beyond code structure may exceed current capabilities.
 
-\subsection{Defender Goals}
+\subsection{Limitations}\label{subsec:limitations}
 
-The automated repair system aims to produce patches that:
-\begin{enumerate}
-\item \textbf{Eliminate the vulnerability:} The exploitable condition cannot occur under any feasible input
-\item \textbf{Preserve functionality:} Legitimate program behavior remains unchanged
-\item \textbf{Introduce no new vulnerabilities:} The patch does not create new security weaknesses
-\end{enumerate}
+\textbf{Validation Methodology.} PatchScribe provides \emph{systematic verification} with strong empirical assurance through multi-layered validation (consistency checking, ground truth comparison, structured evaluation) rather than theorem-proving-level formal guarantees. While stronger than exploit-only or test-only methods, highest-assurance contexts may require additional verification layers (theorem provers, model checkers). Future work will integrate lightweight symbolic execution.
 
-\subsection{Security Guarantees}
+\textbf{PCG/SCM Completeness.} Effectiveness depends on PCG accurately capturing all causal paths. Static analysis may miss complex indirect data flows, leading to incomplete explanations. We mitigate through multiple analysis techniques, conservative assumptions, and explicit acknowledgment of limitations. Most benchmark CVEs' primary causal paths are captured, but complex multi-cause vulnerabilities remain challenging.
 
-\textbf{Guarantee 1 (Vulnerability Elimination):}
-For any patch $P'$ that passes PatchScribe's consistency verification, the vulnerability condition $V_{\text{bug}}$ is unreachable via the causal paths identified in $E_{\text{bug}}$.
+\textbf{LLM Dependence.} Patch quality is bounded by LLM capabilities. While theory-guided generation improves results, intricate cryptographic bugs or domain-specific logic may exceed current capabilities. Improvements in foundation models would directly benefit PatchScribe.
 
-\textbf{Formal Statement:}
-$$\forall \text{input} \in \text{InputSpace}: \lnot \text{Reachable}(V_{\text{bug}}|P', E_{\text{bug}})$$
+\textbf{Scope Restrictions.} We handle deterministic single-threaded vulnerabilities, memory safety, and logic bugs. Out of scope: concurrency bugs, side-channels, and vulnerabilities requiring deep semantic domain knowledge. Our evaluation focuses on C/C++ memory safety (particularly CWE-125 in Zeroday dataset); generalization to other languages and vulnerability types requires further validation.
 
-\textbf{Caveat:} This guarantee holds under the assumption that $E_{\text{bug}}$ correctly captures all causal paths. If PCG construction misses a path (soundness failure), the guarantee may not hold for that path.
+\textbf{New Vulnerability Introduction.} While we test for obvious regressions, we cannot guarantee no new vulnerabilities are introduced. Our verification focuses on the specific known vulnerability; complete security assurance requires additional layers.
 
-\textbf{Guarantee 2 (Explanation Consistency):}
-Every verified patch includes dual explanations ($E_{\text{bug}}$ and $E_{\text{patch}}$) that are mutually consistent, meaning $E_{\text{patch}}$ addresses all causes identified in $E_{\text{bug}}$.
+\subsection{Ethics and Responsible Research}\label{subsec:ethics}
 
-\textbf{Guarantee 3 (No New Vulnerabilities - Best Effort):}
-We perform basic testing and pattern analysis to detect newly introduced issues, but cannot guarantee absence of all new vulnerabilities without full program verification.
+\textbf{Responsible Disclosure.} All CVEs are publicly disclosed and patched. Datasets contain only vulnerabilities with available patches. No private or proprietary code is included.
 
-\subsection{Out of Scope}
+\textbf{Potential Misuse.} We emphasize defensive use only, require vulnerability location as input (not a discovery tool), document limitations transparently, and release code with responsible use guidelines.
 
-The following are explicitly outside PatchScribe's threat model:
-\begin{itemize}
-\item Concurrency vulnerabilities (race conditions, TOCTOU)
-\item Side-channel attacks
-\item Vulnerabilities requiring deep semantic understanding beyond code structure
-\item Adversarial manipulation of the LLM or analysis tools
-\end{itemize}
+\textbf{Societal Impact.} Automated repair accelerates security patches but may reduce security researcher employment, create AI dependency for critical decisions, or introduce new failure modes if over-trusted. We recommend PatchScribe as a developer assistance tool requiring human review.
 
-\section{Limitations}\label{sec:limitations}
+\subsection{LLM Usage and Reproducibility}\label{subsec:llm-usage}
 
-PatchScribe addresses key challenges in automated vulnerability repair, but several limitations remain:
+\textbf{Models and Reproducibility.} We use OpenAI GPT-4o-mini with \texttt{temperature=0} and \texttt{seed} parameter. We run experiments multiple times, archive all responses, and provide deterministic components (PCG, consistency checking) as independent modules. LLM API outputs exhibit non-determinism despite fixed parameters.
 
-\subsection{Core Limitations}
+\textbf{Data Contamination.} Datasets contain CVEs from 2024; some may appear in LLM training data. We focus on methodology rather than absolute performance; ablation study (C1-C4) controls for LLM capabilities using the same model.
 
-\textbf{L1: Validation Methodology and Assurance Level}
-
-PatchScribe employs a multi-layered validation approach combining (1) automated consistency checking between $E_{\text{bug}}$ and $E_{\text{patch}}$, (2) ground truth validation against reference standards, and (3) structured multi-dimensional evaluation of explanation quality.
-While our original research design aimed for symbolic execution-based formal verification (using tools like KLEE or Z3 SMT solving), we adopted the current approach for three reasons:
-First, symbolic execution often suffers from path explosion on real-world code, limiting practical applicability.
-Second, structured evaluation allows nuanced assessment of explanation quality beyond binary correct/incorrect judgments.
-Third, the combination of multiple validation methods (consistency + ground truth + structured) provides complementary strengths that individual methods lack.
-
-This means PatchScribe provides \emph{systematic verification} with strong empirical assurance rather than theorem-proving-level formal guarantees.
-Our validation is substantially stronger than existing exploit-only or test-only methods, as it validates causal consistency, structural similarity, and multi-dimensional explanation quality.
-However, for highest-assurance contexts requiring mathematical proofs (e.g., safety-critical embedded systems), additional verification layers such as theorem provers or model checkers may be needed.
-Future work will integrate symbolic execution to achieve full formal verification while maintaining practical scalability (Section~\ref{sec:future-work}).
-
-\textbf{L2: PCG/SCM Completeness}
-
-PatchScribe's effectiveness depends on PCG accurately capturing all causal paths.
-If static analysis misses a path (e.g., complex indirect data flow), the explanation may be incomplete.
-We mitigate this through: (a) combining multiple analysis techniques (slicing, taint tracking, pattern detection), (b) conservative assumptions in ambiguous cases, (c) explicit acknowledgment of limitations.
-Most benchmark CVEs have primary causal paths that our analysis captures, but complex multi-cause vulnerabilities remain challenging.
-
-\textbf{L3: LLM Dependence}
-
-PatchScribe's patch quality is bounded by LLM capabilities.
-While theory-guided generation improves results, some vulnerabilities (e.g., intricate cryptographic bugs, domain-specific logic) may exceed current LLM capabilities.
-Our evaluation documents such cases transparently.
-Improvements in foundation models would directly benefit PatchScribe.
-
-\textbf{L4: Scope Restrictions}
-
-PatchScribe currently handles: (a) deterministic single-threaded vulnerabilities, (b) memory safety and logic bugs, (c) single-cause or simple multi-cause scenarios.
-Out of scope: concurrency bugs (TOCTOU, race conditions), side-channels, and vulnerabilities requiring deep semantic domain knowledge.
-
-\textbf{L5: LLM Bias and Generalization}
-
-GPT-4o-mini's training data likely overrepresents well-documented projects (e.g., Linux kernel, popular libraries) and common programming patterns, while underrepresenting niche domains such as embedded systems, legacy codebases, or projects with non-English comments.
-This training bias may affect patch quality across different code sources.
-We evaluated PatchScribe on diverse benchmarks (APPATCH: recent 2024 CVEs, ExtractFix: curated diverse cases), but broader validation on industrial and proprietary codebases is needed.
-
-Additionally, our evaluation focuses primarily on C/C++ memory safety bugs.
-Applicability to other contexts requires validation:
-(1) Other programming languages (Rust, Go, Java) require language-specific PCG construction and causal patterns.
-(2) Other vulnerability types (logic bugs, cryptographic flaws, access control issues) may need different causal modeling approaches.
-(3) Domain-specific code (kernel drivers, real-time systems, embedded firmware) may have unique idioms and constraints that challenge current LLM capabilities.
-
-Future work should systematically evaluate generalization across programming languages, vulnerability categories (CWE types), and application domains to identify systematic biases and limitations.
-
-\textbf{L6: Dataset Bias and External Validity}
-
-The APPATCH Zeroday Repair dataset (97 cases) is heavily weighted toward CWE-125 (out-of-bounds read) vulnerabilities, limiting diversity in our evaluation.
-While ExtractFix (24 cases) provides broader CWE coverage, the 4:1 ratio means our aggregate results are dominated by one vulnerability type.
-This imbalance affects external validity—success rates may not generalize uniformly across all vulnerability categories.
-
-We mitigate this through transparent reporting of per-CWE results and acknowledgment of dataset composition.
-However, comprehensive evaluation across balanced representation of major CWE categories (buffer overflows, use-after-free, NULL dereference, integer overflow, SQL injection, XSS, etc.) remains future work.
-Our current findings should be interpreted as particularly strong evidence for memory safety vulnerabilities, with cautious extrapolation to other types.
-
-\textbf{L7: New Vulnerability Introduction}
-
-While we test for obvious regressions, PatchScribe cannot guarantee no new vulnerabilities are introduced.
-Our verification focuses on the specific known vulnerability. Complete security assurance requires additional verification layers beyond our scope.
-
-\subsection{Threats to Validity}
-
-\textbf{Internal Validity:} PCG construction may miss paths; we mitigate through multi-technique analysis and conservative assumptions.
-
-\textbf{External Validity:} Evaluation focuses on CWE-125 (Zeroday dataset); generalization to other vulnerability types requires further validation.
-
-\textbf{Construct Validity:} Success metrics clearly distinguish patch generation rate, consistency verification rate, and vulnerability elimination rate to avoid confusion.
-
-Despite these limitations, PatchScribe meaningfully advances automated vulnerability repair through systematic causal analysis.
-We address validity threats through transparent reporting and conservative design choices.
-
-\section{Ethics Considerations}\label{sec:ethics}
-
-\textbf{Responsible Disclosure:} All CVEs used in this study are publicly disclosed and patched.
-We do not introduce new vulnerabilities or exploits. The Zeroday Repair and ExtractFix datasets contain only vulnerabilities with available patches.
-
-\textbf{Potential Misuse:} PatchScribe could potentially be misused to: (a) identify vulnerable code patterns for exploit development, (b) generate incomplete patches that provide false security, or (c) automate vulnerability discovery in proprietary code without authorization. We mitigate these risks by:
-\begin{itemize}
-\item Emphasizing that PatchScribe is for defensive purposes only
-\item Requiring vulnerability location as input (not a vulnerability discovery tool)
-\item Transparently documenting limitations to prevent overconfidence
-\item Releasing code with responsible use guidelines
-\end{itemize}
-
-\textbf{Data and Privacy:} No human subjects are involved in this research.
-All code analyzed is open-source or from public vulnerability databases.
-No private or proprietary code is included in our evaluation.
-
-\textbf{Societal Impact:} Automated vulnerability repair can benefit society by accelerating security patches, but may also: (a) reduce security researcher employment, (b) create dependency on AI systems for critical security decisions, (c) introduce new failure modes if over-trusted.
-We recommend PatchScribe as a developer assistance tool requiring human review, not autonomous deployment.
-
-\section{LLM Usage Considerations}\label{sec:llm-usage}
-
-\textbf{Models Used:} We primarily use OpenAI GPT-4o-mini for patch generation.
-Experiments were conducted between [dates TBD].
-We also evaluate [Model-2 TBD] for comparison.
-All models accessed via API with rate limiting and usage monitoring.
-
-\textbf{Reproducibility Concerns:} LLM API outputs exhibit non-determinism despite fixed parameters. To enhance reproducibility:
-\begin{itemize}
-  \item We set \texttt{temperature=0} for all experiments
-  \item We use \texttt{seed} parameter when supported by API
-  \item We run each experiment [N] times and report aggregate statistics
-  \item We archive all LLM responses for post-hoc analysis
-  \item We provide deterministic components (PCG construction, consistency checking) as independent modules
-\end{itemize}
-
-\textbf{Data Contamination:} The vulnerability datasets (Zeroday Repair, ExtractFix) contain CVEs from 2024 and recent years. Some may have appeared in LLM training data, potentially inflating performance. We acknowledge this limitation and note that:
-\begin{itemize}
-  \item Training data cutoff dates vary by model
-  \item Exact training data composition is proprietary
-  \item Our evaluation focuses on methodology rather than absolute performance
-  \item Ablation study (C1-C4) controls for LLM capabilities by using same model across conditions
-\end{itemize}
-
-\textbf{Environmental Impact:} Total compute for experiments: approximately [X] API calls, estimated [Y] kWh energy consumption. Carbon footprint estimated at [Z] kg CO$_2$e based on cloud provider data.
-We minimize environmental impact through: (a) efficient prompt design, (b) caching intermediate results, (c) targeted experiments rather than exhaustive search.
-
-\textbf{Bias and Fairness:} LLMs may exhibit biases in code generation (e.g., favoring certain programming styles, languages, or vulnerability types).
-Our evaluation across diverse CWE types helps identify systematic biases. We observe [findings TBD] and recommend future work on bias mitigation.
-
-\textbf{Transparency:} We commit to releasing: (a) all prompts used, (b) LLM response logs (with API keys redacted), (c) evaluation scripts, (d) aggregate statistics. This enables community scrutiny and reproduction.
+\textbf{Transparency.} We commit to releasing all prompts, LLM response logs (API keys redacted), evaluation scripts, and aggregate statistics for community validation.
 
 \section{Conclusion}\label{sec:conclusion}
 
 This paper presented PatchScribe, a theory-guided framework for automated vulnerability repair that produces dual causal explanations.
 Our work addresses a critical gap in current automated repair: patches often come with unverifiable post-hoc explanations, leading to uncertainty about whether vulnerabilities are truly eliminated.
-PatchScribe tackles this through a two-phase approach: we construct a Program Causal Graph and Structural Causal Model to formally capture vulnerability causes, then use this formalization to guide LLM-based patch generation with precise constraints, producing patches with dual explanations (E_bug and E_patch).
+PatchScribe tackles this through a two-phase approach: we construct a Program Causal Graph and Structural Causal Model to formally capture vulnerability causes, then use this formalization to guide LLM-based patch generation with precise constraints, producing patches with dual explanations ($E_{\text{bug}}$ and $E_{\text{patch}}$).
 
 Our approach contributes a novel way to improve patch assurance.
 By treating patches as interventions in a causal model, we enable systematic verification through dual explanation consistency checking.

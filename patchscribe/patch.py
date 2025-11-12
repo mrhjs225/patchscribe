@@ -12,6 +12,11 @@ from .intervention import InterventionSpec
 from .pcg import PCGNode, ProgramCausalGraph
 from .llm import LLMClient, LLMUnavailable, PromptOptions
 
+# Import SpecificationLevel for type hints (avoid circular import)
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .spec_builder import SpecificationLevel
+
 
 @dataclass
 class PatchResult:
@@ -31,8 +36,9 @@ class PatchGenerator:
         vuln_line: int,
         signature: str,
         llm_client: LLMClient | None = None,
-        strategy: str = "formal",
-        natural_context: str | None = None,
+        spec_level: Optional["SpecificationLevel"] = None,  # NEW: Unified prompt
+        strategy: str = "formal",  # Deprecated, kept for compatibility
+        natural_context: str | None = None,  # Deprecated
         prompt_options: PromptOptions | None = None,
     ) -> None:
         self.graph = graph
@@ -40,6 +46,7 @@ class PatchGenerator:
         self.vuln_line = vuln_line
         self.signature = signature
         self.llm_client = llm_client or LLMClient()
+        self.spec_level = spec_level  # NEW
         self.strategy = strategy
         self.natural_context = natural_context
         self.prompt_options = prompt_options
@@ -61,7 +68,8 @@ class PatchGenerator:
                 original_code=self.program,
                 vulnerability_signature=self.signature,
                 interventions=[intervention.__dict__ for intervention in spec.interventions],
-                strategy=self.strategy,
+                spec_level=self.spec_level,  # NEW: Use unified prompt
+                strategy=self.strategy,  # Keep for backward compatibility
                 natural_context=self.natural_context,
                 prompt_options=self.prompt_options,
             )

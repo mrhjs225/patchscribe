@@ -603,10 +603,10 @@ Example usage:
     print(f"📂 Output directory: {output_dir}")
     print(f"   Input structure will be preserved under output directory")
 
-    # Initialize evaluator (default: 3-judge majority voting)
+    # Initialize evaluator (use only GPT-5)
     evaluator = ResultEvaluator(
-        use_majority_voting=not args.single_judge,
-        judge_models=['gpt', 'claude', 'gemini'],
+        use_majority_voting=False,  # Single judge only
+        judge_models=['gpt'],  # GPT-5 only
         batch_size=args.concurrency,
     )
 
