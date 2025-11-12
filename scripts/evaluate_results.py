@@ -3,9 +3,9 @@
 Post-hoc evaluation script for PatchScribe results.
 
 This script loads saved experiment results (patches + explanations) and applies
-LLM judge evaluation with 3-judge majority voting (GPT, Claude, Gemini):
-1. Success judgment (SynEq/SemEq/Plausible) - majority voting (2/3)
-2. Explanation quality scoring - averaging across 3 judges
+LLM judge evaluation using gpt-5-mini:
+1. Success judgment (SynEq/SemEq/Plausible)
+2. Explanation quality scoring
 
 Usage:
     # Evaluate all results in a directory
@@ -45,28 +45,19 @@ class ResultEvaluator:
     def __init__(
         self,
         *,
-        use_majority_voting: bool = True,
-        judge_models: List[str] = None,
         batch_size: int = 5,
     ):
         """
         Args:
-            use_majority_voting: If True, use 3 judges with majority voting
-            judge_models: List of judge models (default: ['gpt', 'claude', 'gemini'])
             batch_size: Batch size for parallel evaluation
         """
-        self.use_majority_voting = use_majority_voting
-        self.judge_models = judge_models or ['gpt', 'claude', 'gemini']
         self.batch_size = batch_size
 
-        # Initialize success judge
-        self.success_judge = PatchSuccessJudge(
-            use_majority_voting=use_majority_voting,
-            judge_models=self.judge_models
-        )
+        # Initialize success judge with gpt-5-mini only
+        self.success_judge = PatchSuccessJudge()
 
-        print(f"✅ Initialized evaluator with judges: {', '.join(self.judge_models)}")
-        print(f"   Voting method: {'majority (2/3)' if use_majority_voting else 'single'}")
+        print(f"✅ Initialized evaluator with judge: gpt-5-mini")
+        print(f"   Voting method: single judge")
 
     def evaluate_file(
         self,
@@ -117,8 +108,8 @@ class ResultEvaluator:
         data['evaluation_metadata'] = {
             'input_file': str(input_file),
             'evaluation_timestamp': datetime.now().isoformat(),
-            'judges': self.judge_models,
-            'voting_method': 'majority' if self.use_majority_voting else 'single',
+            'judge': 'gpt-5-mini',
+            'voting_method': 'single',
             'success_evaluated': not skip_success,
             'explanation_evaluated': not skip_explanation,
         }
@@ -141,7 +132,7 @@ class ResultEvaluator:
         eval_tasks = []
         for idx, case in enumerate(cases):
             # Skip if already has success judgment from experiment
-            if case.get('success_judgment') and not self.use_majority_voting:
+            if case.get('success_judgment'):
                 skipped_count += 1
                 continue
 
@@ -263,37 +254,10 @@ class ResultEvaluator:
             print(f"  ⚠️  No valid explanations to evaluate")
             return
 
-        print(f"  📝 Evaluating {len(prompts)} explanations with {len(self.judge_models)} judges...")
+        print(f"  📝 Evaluating {len(prompts)} explanations with gpt-5-mini...")
 
-        # Evaluate with multiple judges if using majority voting
-        if self.use_majority_voting:
-            all_judge_scores = {}
-
-            # Parallelize judge evaluations using ThreadPoolExecutor
-            def evaluate_with_judge(judge_key: str):
-                return judge_key, LLMClient.batch_score_explanations(
-                    prompts,
-                    max_workers=self.batch_size,
-                    judge_model=judge_key
-                )
-
-            with ThreadPoolExecutor(max_workers=len(self.judge_models)) as executor:
-                futures = {executor.submit(evaluate_with_judge, judge_key): judge_key
-                          for judge_key in self.judge_models}
-
-                for future in tqdm(as_completed(futures), total=len(futures), desc="  Judges", unit="judge"):
-                    judge_key, scores = future.result()
-                    all_judge_scores[judge_key] = scores
-
-            # Average the scores
-            scores = []
-            for i in range(len(prompts)):
-                judge_responses = [all_judge_scores[j][i] for j in self.judge_models]
-                averaged = self._average_judge_scores(judge_responses, self.judge_models)
-                scores.append(averaged)
-        else:
-            # Single judge evaluation
-            scores = LLMClient.batch_score_explanations(prompts, max_workers=self.batch_size)
+        # Single judge evaluation with gpt-5-mini
+        scores = LLMClient.batch_score_explanations(prompts, max_workers=self.batch_size, judge_model='gpt')
 
         # Parse scores and update cases
         success_count = 0
@@ -336,82 +300,12 @@ class ResultEvaluator:
                         'reasoning': score_data.get('reasoning', ''),
                     })
 
-                # Store individual judge scores if available
-                if 'individual_judges' in score_data:
-                    case['explanation_metrics']['llm_scores']['individual_judges'] = score_data['individual_judges']
-                if 'voting_method' in score_data:
-                    case['explanation_metrics']['llm_scores']['voting_method'] = score_data['voting_method']
-                if 'num_judges' in score_data:
-                    case['explanation_metrics']['llm_scores']['num_judges'] = score_data['num_judges']
-
                 success_count += 1
             except (json.JSONDecodeError, ValueError, KeyError) as e:
                 print(f"  ⚠️  Failed to parse judge response for case {case.get('case_id', idx)}: {e}")
                 continue
 
         print(f"  ✅ Successfully evaluated {success_count}/{len(prompts)} explanations")
-
-    @staticmethod
-    def _average_judge_scores(responses: List[Optional[str]], judge_names: List[str]) -> Optional[str]:
-        """Average scores from multiple judges."""
-        # Parse all responses
-        parsed_scores = []
-        for resp in responses:
-            if not resp:
-                continue
-            try:
-                parsed = json.loads(resp)
-                parsed_scores.append(parsed)
-            except json.JSONDecodeError:
-                continue
-
-        if not parsed_scores:
-            return None
-
-        # Determine format (new or old)
-        has_new_format = any(
-            'vulnerability_understanding' in s
-            for s in parsed_scores
-        )
-
-        if has_new_format:
-            dimensions = ['vulnerability_understanding', 'patch_understanding', 'causal_connection', 'actionability']
-        else:
-            dimensions = ['accuracy', 'completeness', 'clarity', 'causality']
-
-        # Average each dimension
-        averaged = {}
-        for dim in dimensions:
-            values = [float(s.get(dim, 0)) for s in parsed_scores if dim in s]
-            if values:
-                averaged[dim] = sum(values) / len(values)
-            else:
-                averaged[dim] = 0.0
-
-        # Collect individual judge scores
-        averaged['individual_judges'] = {}
-        for judge_name, score_dict in zip(judge_names, parsed_scores):
-            averaged['individual_judges'][judge_name] = {
-                dim: float(score_dict.get(dim, 0))
-                for dim in dimensions
-            }
-
-        # Collect reasoning
-        reasoning_parts = []
-        for judge_name, score_dict in zip(judge_names, parsed_scores):
-            judge_reasoning = []
-            for dim in dimensions:
-                reasoning_key = f"{dim}_reasoning"
-                if reasoning_key in score_dict:
-                    judge_reasoning.append(f"{dim}: {score_dict[reasoning_key]}")
-            if judge_reasoning:
-                reasoning_parts.append(f"[{judge_name}]\n" + "\n".join(judge_reasoning))
-
-        averaged['reasoning'] = "\n\n".join(reasoning_parts) if reasoning_parts else "Averaged from multiple judges"
-        averaged['voting_method'] = 'average'
-        averaged['num_judges'] = len(parsed_scores)
-
-        return json.dumps(averaged)
 
     @staticmethod
     def _find_latest_results(input_path: Path) -> List[Path]:
@@ -519,12 +413,12 @@ class ResultEvaluator:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Post-hoc evaluation of PatchScribe experiment results with 3-judge majority voting',
+        description='Post-hoc evaluation of PatchScribe experiment results with gpt-5-mini',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example usage:
 
-1. Evaluate all results in a directory (default: 3-judge voting):
+1. Evaluate all results in a directory:
    python scripts/evaluate_results.py results/local
 
 2. Specify output directory:
@@ -532,9 +426,6 @@ Example usage:
 
 3. Increase concurrency for faster evaluation:
    python scripts/evaluate_results.py results/local --concurrency 20
-
-4. Use single judge only (faster, for testing):
-   python scripts/evaluate_results.py results/local --single-judge
         """
     )
 
@@ -547,11 +438,6 @@ Example usage:
         '--output',
         type=Path,
         help='Output directory (default: input_path with _evaluated suffix)'
-    )
-    parser.add_argument(
-        '--single-judge',
-        action='store_true',
-        help='Use single GPT judge only (faster, for testing). Default: 3-judge majority voting'
     )
     parser.add_argument(
         '--concurrency',
@@ -603,10 +489,8 @@ Example usage:
     print(f"📂 Output directory: {output_dir}")
     print(f"   Input structure will be preserved under output directory")
 
-    # Initialize evaluator (use only GPT-5)
+    # Initialize evaluator (use only gpt-5-mini)
     evaluator = ResultEvaluator(
-        use_majority_voting=False,  # Single judge only
-        judge_models=['gpt'],  # GPT-5 only
         batch_size=args.concurrency,
     )
 

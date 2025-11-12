@@ -465,8 +465,6 @@ def run_single_evaluation(
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
     skip_judge_evaluation: bool = False,
-    use_majority_voting: bool = False,
-    judge_models: List[str] = None,
 ) -> Dict:
     """단일 모델 × 조건에 대한 평가 실행"""
     from patchscribe.pipeline import PatchScribePipeline
@@ -564,8 +562,6 @@ def run_single_evaluation(
         pipeline=pipeline,
         max_workers=evaluator_kwargs.get('max_workers'),
         enable_judge=not skip_judge_evaluation,  # Skip judge if flag is set
-        use_majority_voting=use_majority_voting,
-        judge_models=judge_models or ['gpt', 'claude', 'gemini'],
     )
     report = evaluator.run(cases)
 
@@ -642,8 +638,6 @@ def run_experiment(
     force_stage1_recompute: bool = False,
     precompute_stage1_only: bool = False,
     skip_judge_evaluation: bool = False,
-    use_majority_voting: bool = False,
-    judge_models: List[str] = None,
 ):
     """통합 실험 실행
 
@@ -700,14 +694,14 @@ def run_experiment(
             cases, models, conditions, output_dir, llm_config,
             server_id, verbose, run_label, disable_consistency_check,
             stage1_cache_dir, force_stage1_recompute,
-            skip_judge_evaluation, use_majority_voting, judge_models
+            skip_judge_evaluation
         )
     else:
         results_summary = _run_experiment_sequential(
             cases, models, conditions, output_dir, llm_config,
             server_id, verbose, run_label, disable_consistency_check,
             stage1_cache_dir, force_stage1_recompute,
-            skip_judge_evaluation, use_majority_voting, judge_models
+            skip_judge_evaluation
         )
 
     # 불완전 패치 생성 (RQ2)
@@ -781,8 +775,6 @@ def _run_experiment_sequential(
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
     skip_judge_evaluation: bool = False,
-    use_majority_voting: bool = False,
-    judge_models: List[str] = None,
 ) -> List[Dict]:
     """순차 처리 모드 (기존 동작)"""
     results_summary = []
@@ -825,8 +817,6 @@ def _run_experiment_sequential(
                     stage1_cache_dir=stage1_cache_dir,
                     force_stage1_recompute=force_stage1_recompute,
                     skip_judge_evaluation=skip_judge_evaluation,
-                    use_majority_voting=use_majority_voting,
-                    judge_models=judge_models,
                 )
                 model_results['conditions'][condition] = {
                     'success_rate': result['metrics'].get('success_rate', 0),
@@ -871,8 +861,6 @@ def _run_experiment_parallel(
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
     skip_judge_evaluation: bool = False,
-    use_majority_voting: bool = False,
-    judge_models: List[str] = None,
 ) -> List[Dict]:
     """병렬 처리 모드: 모든 (모델, condition) 조합을 동시에 처리"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -934,8 +922,6 @@ def _run_experiment_parallel(
                 stage1_cache_dir=stage1_cache_dir,
                 force_stage1_recompute=force_stage1_recompute,
                 skip_judge_evaluation=skip_judge_evaluation,
-                use_majority_voting=use_majority_voting,
-                judge_models=judge_models,
             )
 
             with print_lock:
@@ -1114,18 +1100,6 @@ def main():
         '--skip-judge-evaluation',
         action='store_true',
         help='Skip all judge evaluation (success + explanation). Only generate patches and explanations. Useful for separating experiment from evaluation.'
-    )
-    parser.add_argument(
-        '--use-majority-voting',
-        action='store_true',
-        help='Use 3 LLM judges (GPT, Claude, Gemini) with majority voting for success evaluation'
-    )
-    parser.add_argument(
-        '--judge-models',
-        nargs='+',
-        choices=['gpt', 'claude', 'gemini'],
-        default=['gpt', 'claude', 'gemini'],
-        help='Judge models to use for majority voting (default: gpt claude gemini)'
     )
 
     # LLM configuration
@@ -1308,8 +1282,6 @@ def main():
             force_stage1_recompute=args.refresh_stage1_cache,
             precompute_stage1_only=args.precompute_stage1,
             skip_judge_evaluation=args.skip_judge_evaluation,
-            use_majority_voting=args.use_majority_voting,
-            judge_models=args.judge_models,
         )
 
         if args.precompute_stage1:

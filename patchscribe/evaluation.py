@@ -84,14 +84,10 @@ class Evaluator:
         max_workers: int | None = None,
         enable_judge: bool = False,
         judge_batch_size: int = 5,
-        use_majority_voting: bool = False,
-        judge_models: List[str] = None,
     ) -> None:
         self.pipeline = pipeline or PatchScribePipeline()
         self.enable_judge = enable_judge
         self.judge_batch_size = judge_batch_size
-        self.use_majority_voting = use_majority_voting
-        self.judge_models = judge_models or ["gpt", "claude", "gemini"]
         config = LLMConfig.from_env()
 
         # Ollama는 병렬 요청을 제대로 처리하지 못하므로 항상 순차 실행
@@ -433,31 +429,9 @@ class Evaluator:
             print("  ⚠️  No valid explanations to evaluate")
             return report
 
-        # Evaluate with multiple judges if majority voting is enabled
-        if self.use_majority_voting:
-            print(f"  Evaluating {len(prompts)} cases with 3 judges (GPT, Claude, Gemini) using averaging...")
-
-            # Collect scores from all 3 judges
-            all_judge_scores = {}
-            for judge_key in self.judge_models:
-                print(f"    Evaluating with {judge_key}...")
-                judge_scores = LLMClient.batch_score_explanations(
-                    prompts,
-                    max_workers=self.judge_batch_size,
-                    judge_model=judge_key
-                )
-                all_judge_scores[judge_key] = judge_scores
-
-            # Average the scores
-            scores = []
-            for i in range(len(prompts)):
-                judge_responses = [all_judge_scores[j][i] for j in self.judge_models]
-                averaged = self._average_judge_scores(judge_responses, self.judge_models)
-                scores.append(averaged)
-        else:
-            print(f"  Evaluating {len(prompts)} cases with GPT-5 judge (batch size: {self.judge_batch_size})...")
-            # Single judge evaluation
-            scores = LLMClient.batch_score_explanations(prompts, max_workers=self.judge_batch_size)
+        # Evaluate with gpt-5-mini
+        print(f"  Evaluating {len(prompts)} cases with gpt-5-mini judge (batch size: {self.judge_batch_size})...")
+        scores = LLMClient.batch_score_explanations(prompts, max_workers=self.judge_batch_size)
 
         # Parse scores and update case evaluations
         success_count = 0
@@ -527,80 +501,6 @@ class Evaluator:
 
         return report
 
-    @staticmethod
-    def _average_judge_scores(responses: List[Optional[str]], judge_names: List[str]) -> Optional[str]:
-        """
-        Average scores from multiple judges.
-
-        Args:
-            responses: List of JSON responses from each judge
-            judge_names: Names of judges (for logging)
-
-        Returns:
-            JSON string with averaged scores
-        """
-        import json
-
-        # Parse all responses
-        parsed_scores = []
-        for resp in responses:
-            if not resp:
-                continue
-            try:
-                parsed = json.loads(resp)
-                parsed_scores.append(parsed)
-            except json.JSONDecodeError:
-                continue
-
-        if not parsed_scores:
-            return None
-
-        # Determine format (new or old)
-        has_new_format = any(
-            'vulnerability_understanding' in s
-            for s in parsed_scores
-        )
-
-        if has_new_format:
-            # New format: vulnerability_understanding, patch_understanding, causal_connection, actionability
-            dimensions = ['vulnerability_understanding', 'patch_understanding', 'causal_connection', 'actionability']
-        else:
-            # Old format: accuracy, completeness, clarity, causality
-            dimensions = ['accuracy', 'completeness', 'clarity', 'causality']
-
-        # Average each dimension
-        averaged = {}
-        for dim in dimensions:
-            values = [float(s.get(dim, 0)) for s in parsed_scores if dim in s]
-            if values:
-                averaged[dim] = sum(values) / len(values)
-            else:
-                averaged[dim] = 0.0
-
-        # Collect individual judge scores for transparency
-        averaged['individual_judges'] = {}
-        for i, (judge_name, score_dict) in enumerate(zip(judge_names, parsed_scores)):
-            averaged['individual_judges'][judge_name] = {
-                dim: float(score_dict.get(dim, 0))
-                for dim in dimensions
-            }
-
-        # Collect reasoning from all judges
-        reasoning_parts = []
-        for judge_name, score_dict in zip(judge_names, parsed_scores):
-            judge_reasoning = []
-            for dim in dimensions:
-                reasoning_key = f"{dim}_reasoning"
-                if reasoning_key in score_dict:
-                    judge_reasoning.append(f"{dim}: {score_dict[reasoning_key]}")
-            if judge_reasoning:
-                reasoning_parts.append(f"[{judge_name}]\n" + "\n".join(judge_reasoning))
-
-        averaged['reasoning'] = "\n\n".join(reasoning_parts) if reasoning_parts else "Averaged from multiple judges"
-        averaged['voting_method'] = 'average'
-        averaged['num_judges'] = len(parsed_scores)
-
-        return json.dumps(averaged)
 
 
 def _effect_rate(evaluations: Iterable[CaseEvaluation]) -> float:
@@ -638,19 +538,9 @@ def _normalize_code(code: str | None) -> str:
     return "\n".join(line.rstrip() for line in code.strip().splitlines())
 
 
-@lru_cache(maxsize=2)
-def _get_patch_success_judge(use_majority_voting: bool = False) -> PatchSuccessJudge:
-    """Instantiate a PatchSuccessJudge per process.
-
-    Args:
-        use_majority_voting: If True, create judge with 3 LLMs and majority voting
-    """
-    import os
-    if use_majority_voting:
-        return PatchSuccessJudge(
-            use_majority_voting=True,
-            judge_models=["gpt", "claude", "gemini"]
-        )
+@lru_cache(maxsize=1)
+def _get_patch_success_judge() -> PatchSuccessJudge:
+    """Instantiate a PatchSuccessJudge per process (always uses gpt-5-mini)."""
     return PatchSuccessJudge()
 
 
@@ -664,11 +554,8 @@ def _evaluate_case_wrapper(
     ProcessPoolExecutor는 인스턴스 메서드를 직접 호출할 수 없으므로
     모듈 레벨 함수가 필요함.
     """
-    import os
     artifacts = pipeline.run(case)
-    # Check if majority voting is enabled via environment variable
-    use_voting = os.environ.get("PATCHSCRIBE_USE_MAJORITY_VOTING", "false").lower() == "true"
-    judge = _get_patch_success_judge(use_majority_voting=use_voting)
+    judge = _get_patch_success_judge()
     generated_patch = artifacts.patch.patched_code or ""
     explanation_bundle = artifacts.explanations
     description_hint = (

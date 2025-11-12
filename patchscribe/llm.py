@@ -40,13 +40,8 @@ DEFAULT_GEMINI_ENDPOINT_TEMPLATE = (
 )
 DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
 
-# Judge model configuration (supports multiple judges for majority voting)
-DEFAULT_JUDGE_MODELS = {
-    "gpt": "gpt-5",
-    "claude": "claude-haiku-4-5",
-    "gemini": "gemini-2.5-flash"
-}
-DEFAULT_JUDGE_MODEL = DEFAULT_JUDGE_MODELS["gpt"]  # Backward compatibility
+# Judge model configuration (single judge: gpt-5-mini)
+DEFAULT_JUDGE_MODEL = "gpt-5-mini"
 DEFAULT_OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 DEFAULT_OPENAI_COMPLETION_MODEL = DEFAULT_JUDGE_MODEL
 
@@ -95,45 +90,20 @@ class LLMConfig:
         """Create LLM config from environment variables.
 
         Args:
-            for_judge: If True, returns config for judge LLM.
+            for_judge: If True, returns config for judge LLM (gpt-5-mini).
                        If False, returns config for main LLM generation.
-            judge_model: Which judge to use ("gpt", "claude", "gemini").
-                        Only applies when for_judge=True. Defaults to "gpt".
+            judge_model: Deprecated. Always uses gpt-5-mini for judge.
         """
         if for_judge:
-            # Support multi-judge configuration
-            judge_key = judge_model or "gpt"  # Default to GPT
-
-            if judge_key == "gpt":
-                return cls(
-                    provider="openai",
-                    endpoint=DEFAULT_OPENAI_ENDPOINT,
-                    api_key=os.environ.get("OPENAI_API_KEY"),
-                    model=DEFAULT_JUDGE_MODELS["gpt"],
-                    timeout=int(os.environ.get("PATCHSCRIBE_JUDGE_TIMEOUT", "120")),
-                    max_tokens=None,
-                )
-            elif judge_key == "claude":
-                return cls(
-                    provider="anthropic",
-                    endpoint=DEFAULT_ANTHROPIC_ENDPOINT,
-                    api_key=os.environ.get("ANTHROPIC_API_KEY"),
-                    model=DEFAULT_JUDGE_MODELS["claude"],
-                    timeout=int(os.environ.get("PATCHSCRIBE_JUDGE_TIMEOUT", "120")),
-                    max_tokens=8192,
-                )
-            elif judge_key == "gemini":
-                model = DEFAULT_JUDGE_MODELS["gemini"]
-                return cls(
-                    provider="gemini",
-                    endpoint=DEFAULT_GEMINI_ENDPOINT_TEMPLATE.format(model=model),
-                    api_key=os.environ.get("GEMINI_API_KEY"),
-                    model=model,
-                    timeout=int(os.environ.get("PATCHSCRIBE_JUDGE_TIMEOUT", "120")),
-                    max_tokens=8192,
-                )
-            else:
-                raise ValueError(f"Unknown judge model: {judge_key}")
+            # Always use gpt-5-mini for judge
+            return cls(
+                provider="openai",
+                endpoint=DEFAULT_OPENAI_ENDPOINT,
+                api_key=os.environ.get("OPENAI_API_KEY"),
+                model=DEFAULT_JUDGE_MODEL,
+                timeout=int(os.environ.get("PATCHSCRIBE_JUDGE_TIMEOUT", "120")),
+                max_tokens=None,
+            )
 
         provider = (os.environ.get("PATCHSCRIBE_LLM_PROVIDER") or "ollama").lower()
         endpoint = os.environ.get("PATCHSCRIBE_LLM_ENDPOINT")
@@ -336,14 +306,14 @@ class LLMClient:
         return content.strip()
 
     def score_explanation(self, prompt: str, *, judge_model: str = None) -> Optional[str]:
-        """Score explanation quality using specified judge (default: gpt-5).
+        """Score explanation quality using gpt-5-mini.
 
         Args:
             prompt: Evaluation prompt
-            judge_model: Which judge to use ("gpt", "claude", "gemini"). Defaults to "gpt".
+            judge_model: Deprecated. Always uses gpt-5-mini.
         """
-        # Create separate judge client with specified judge
-        judge_config = LLMConfig.from_env(for_judge=True, judge_model=judge_model)
+        # Create judge client (always gpt-5-mini)
+        judge_config = LLMConfig.from_env(for_judge=True)
         judge_client = LLMClient(judge_config)
 
         if not judge_client.available():
@@ -360,20 +330,20 @@ class LLMClient:
 
     @staticmethod
     def batch_score_explanations(prompts: List[str], *, max_workers: int = 5, judge_model: str = None) -> List[Optional[str]]:
-        """Score multiple explanations in parallel using specified judge.
+        """Score multiple explanations in parallel using gpt-5-mini.
 
         Args:
             prompts: List of evaluation prompts
             max_workers: Maximum number of concurrent requests (default: 5)
-            judge_model: Which judge to use ("gpt", "claude", "gemini"). Defaults to "gpt".
+            judge_model: Deprecated. Always uses gpt-5-mini.
 
         Returns:
             List of scores in the same order as prompts
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # Create judge client once
-        judge_config = LLMConfig.from_env(for_judge=True, judge_model=judge_model)
+        # Create judge client (always gpt-5-mini)
+        judge_config = LLMConfig.from_env(for_judge=True)
         judge_client = LLMClient(judge_config)
 
         if not judge_client.available():
@@ -393,7 +363,7 @@ class LLMClient:
                 )
                 return index, content.strip()
             except Exception as e:
-                print(f"Warning: Failed to score explanation {index} with {judge_model or 'gpt'}: {e}")
+                print(f"Warning: Failed to score explanation {index} with gpt-5-mini: {e}")
                 return index, None
 
         # Execute in parallel
@@ -410,14 +380,14 @@ class LLMClient:
         return results
 
     def score_patch(self, prompt: str, *, judge_model: str = None) -> Optional[str]:
-        """Score patch quality using specified judge (default: gpt-5).
+        """Score patch quality using gpt-5-mini.
 
         Args:
             prompt: Evaluation prompt
-            judge_model: Which judge to use ("gpt", "claude", "gemini"). Defaults to "gpt".
+            judge_model: Deprecated. Always uses gpt-5-mini.
         """
-        # Create separate judge client with specified judge
-        judge_config = LLMConfig.from_env(for_judge=True, judge_model=judge_model)
+        # Create judge client (always gpt-5-mini)
+        judge_config = LLMConfig.from_env(for_judge=True)
         judge_client = LLMClient(judge_config)
 
         if not judge_client.available():
@@ -434,20 +404,20 @@ class LLMClient:
 
     @staticmethod
     def batch_score_patches(prompts: List[str], *, max_workers: int = 5, judge_model: str = None) -> List[Optional[str]]:
-        """Score multiple patches in parallel using specified judge.
+        """Score multiple patches in parallel using gpt-5-mini.
 
         Args:
             prompts: List of patch evaluation prompts
             max_workers: Maximum number of concurrent requests (default: 5)
-            judge_model: Which judge to use ("gpt", "claude", "gemini"). Defaults to "gpt".
+            judge_model: Deprecated. Always uses gpt-5-mini.
 
         Returns:
             List of scores in the same order as prompts
         """
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # Create judge client once
-        judge_config = LLMConfig.from_env(for_judge=True, judge_model=judge_model)
+        # Create judge client (always gpt-5-mini)
+        judge_config = LLMConfig.from_env(for_judge=True)
         judge_client = LLMClient(judge_config)
 
         if not judge_client.available():
@@ -467,7 +437,7 @@ class LLMClient:
                 )
                 return index, content.strip()
             except Exception as e:
-                print(f"Warning: Failed to score patch {index} with {judge_model or 'gpt'}: {e}")
+                print(f"Warning: Failed to score patch {index} with gpt-5-mini: {e}")
                 return index, None
 
         # Execute in parallel
