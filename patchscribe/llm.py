@@ -40,8 +40,13 @@ DEFAULT_GEMINI_ENDPOINT_TEMPLATE = (
 )
 DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
 
-# Judge model configuration (fixed to OpenAI GPT-5-mini)
-DEFAULT_JUDGE_MODEL = "gpt-5"
+# Judge model configuration (supports multiple judges for majority voting)
+DEFAULT_JUDGE_MODELS = {
+    "gpt": "gpt-5",
+    "claude": "claude-haiku-4-5",
+    "gemini": "gemini-2.5-flash"
+}
+DEFAULT_JUDGE_MODEL = DEFAULT_JUDGE_MODELS["gpt"]  # Backward compatibility
 DEFAULT_OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 DEFAULT_OPENAI_COMPLETION_MODEL = DEFAULT_JUDGE_MODEL
 
@@ -86,22 +91,49 @@ class LLMConfig:
             self.max_tokens = DEFAULT_LLM_MAX_TOKENS
 
     @classmethod
-    def from_env(cls, *, for_judge: bool = False) -> "LLMConfig":
+    def from_env(cls, *, for_judge: bool = False, judge_model: str = None) -> "LLMConfig":
         """Create LLM config from environment variables.
 
         Args:
-            for_judge: If True, returns config for OpenAI GPT-5-mini judge.
+            for_judge: If True, returns config for judge LLM.
                        If False, returns config for main LLM generation.
+            judge_model: Which judge to use ("gpt", "claude", "gemini").
+                        Only applies when for_judge=True. Defaults to "gpt".
         """
         if for_judge:
-            return cls(
-                provider="openai",
-                endpoint=DEFAULT_OPENAI_ENDPOINT,
-                api_key=os.environ.get("OPENAI_API_KEY"),
-                model=DEFAULT_JUDGE_MODEL,
-                timeout=int(os.environ.get("PATCHSCRIBE_JUDGE_TIMEOUT", "120")),
-                max_tokens=None,
-            )
+            # Support multi-judge configuration
+            judge_key = judge_model or "gpt"  # Default to GPT
+
+            if judge_key == "gpt":
+                return cls(
+                    provider="openai",
+                    endpoint=DEFAULT_OPENAI_ENDPOINT,
+                    api_key=os.environ.get("OPENAI_API_KEY"),
+                    model=DEFAULT_JUDGE_MODELS["gpt"],
+                    timeout=int(os.environ.get("PATCHSCRIBE_JUDGE_TIMEOUT", "120")),
+                    max_tokens=None,
+                )
+            elif judge_key == "claude":
+                return cls(
+                    provider="anthropic",
+                    endpoint=DEFAULT_ANTHROPIC_ENDPOINT,
+                    api_key=os.environ.get("ANTHROPIC_API_KEY"),
+                    model=DEFAULT_JUDGE_MODELS["claude"],
+                    timeout=int(os.environ.get("PATCHSCRIBE_JUDGE_TIMEOUT", "120")),
+                    max_tokens=8192,
+                )
+            elif judge_key == "gemini":
+                model = DEFAULT_JUDGE_MODELS["gemini"]
+                return cls(
+                    provider="gemini",
+                    endpoint=DEFAULT_GEMINI_ENDPOINT_TEMPLATE.format(model=model),
+                    api_key=os.environ.get("GEMINI_API_KEY"),
+                    model=model,
+                    timeout=int(os.environ.get("PATCHSCRIBE_JUDGE_TIMEOUT", "120")),
+                    max_tokens=8192,
+                )
+            else:
+                raise ValueError(f"Unknown judge model: {judge_key}")
 
         provider = (os.environ.get("PATCHSCRIBE_LLM_PROVIDER") or "ollama").lower()
         endpoint = os.environ.get("PATCHSCRIBE_LLM_ENDPOINT")
@@ -301,14 +333,15 @@ class LLMClient:
         )
         return content.strip()
 
-    def score_explanation(self, prompt: str) -> Optional[str]:
-        """Score explanation quality using gpt-5 judge.
+    def score_explanation(self, prompt: str, *, judge_model: str = None) -> Optional[str]:
+        """Score explanation quality using specified judge (default: gpt-5).
 
-        This method always uses OpenAI gpt-5, regardless of the
-        main LLM configuration used for generation.
+        Args:
+            prompt: Evaluation prompt
+            judge_model: Which judge to use ("gpt", "claude", "gemini"). Defaults to "gpt".
         """
-        # Create separate judge client with OpenAI gpt-5
-        judge_config = LLMConfig.from_env(for_judge=True)
+        # Create separate judge client with specified judge
+        judge_config = LLMConfig.from_env(for_judge=True, judge_model=judge_model)
         judge_client = LLMClient(judge_config)
 
         if not judge_client.available():
@@ -324,12 +357,13 @@ class LLMClient:
         return content.strip()
 
     @staticmethod
-    def batch_score_explanations(prompts: List[str], *, max_workers: int = 5) -> List[Optional[str]]:
-        """Score multiple explanations in parallel using gpt-5 judge.
+    def batch_score_explanations(prompts: List[str], *, max_workers: int = 5, judge_model: str = None) -> List[Optional[str]]:
+        """Score multiple explanations in parallel using specified judge.
 
         Args:
             prompts: List of evaluation prompts
             max_workers: Maximum number of concurrent requests (default: 5)
+            judge_model: Which judge to use ("gpt", "claude", "gemini"). Defaults to "gpt".
 
         Returns:
             List of scores in the same order as prompts
@@ -337,7 +371,7 @@ class LLMClient:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         # Create judge client once
-        judge_config = LLMConfig.from_env(for_judge=True)
+        judge_config = LLMConfig.from_env(for_judge=True, judge_model=judge_model)
         judge_client = LLMClient(judge_config)
 
         if not judge_client.available():
@@ -357,7 +391,7 @@ class LLMClient:
                 )
                 return index, content.strip()
             except Exception as e:
-                print(f"Warning: Failed to score explanation {index}: {e}")
+                print(f"Warning: Failed to score explanation {index} with {judge_model or 'gpt'}: {e}")
                 return index, None
 
         # Execute in parallel
@@ -373,14 +407,15 @@ class LLMClient:
 
         return results
 
-    def score_patch(self, prompt: str) -> Optional[str]:
-        """Score patch quality using gpt-5 judge.
+    def score_patch(self, prompt: str, *, judge_model: str = None) -> Optional[str]:
+        """Score patch quality using specified judge (default: gpt-5).
 
-        This method always uses OpenAI gpt-5, regardless of the
-        main LLM configuration used for generation.
+        Args:
+            prompt: Evaluation prompt
+            judge_model: Which judge to use ("gpt", "claude", "gemini"). Defaults to "gpt".
         """
-        # Create separate judge client with OpenAI gpt-5
-        judge_config = LLMConfig.from_env(for_judge=True)
+        # Create separate judge client with specified judge
+        judge_config = LLMConfig.from_env(for_judge=True, judge_model=judge_model)
         judge_client = LLMClient(judge_config)
 
         if not judge_client.available():
@@ -396,12 +431,13 @@ class LLMClient:
         return content.strip()
 
     @staticmethod
-    def batch_score_patches(prompts: List[str], *, max_workers: int = 5) -> List[Optional[str]]:
-        """Score multiple patches in parallel using gpt-5 judge.
+    def batch_score_patches(prompts: List[str], *, max_workers: int = 5, judge_model: str = None) -> List[Optional[str]]:
+        """Score multiple patches in parallel using specified judge.
 
         Args:
             prompts: List of patch evaluation prompts
             max_workers: Maximum number of concurrent requests (default: 5)
+            judge_model: Which judge to use ("gpt", "claude", "gemini"). Defaults to "gpt".
 
         Returns:
             List of scores in the same order as prompts
@@ -409,7 +445,7 @@ class LLMClient:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         # Create judge client once
-        judge_config = LLMConfig.from_env(for_judge=True)
+        judge_config = LLMConfig.from_env(for_judge=True, judge_model=judge_model)
         judge_client = LLMClient(judge_config)
 
         if not judge_client.available():
@@ -429,7 +465,7 @@ class LLMClient:
                 )
                 return index, content.strip()
             except Exception as e:
-                print(f"Warning: Failed to score patch {index}: {e}")
+                print(f"Warning: Failed to score patch {index} with {judge_model or 'gpt'}: {e}")
                 return index, None
 
         # Execute in parallel
@@ -725,15 +761,15 @@ class LLMClient:
         provider = (self.config.provider or "").lower()
         if provider == "gemini":
             return (
-                "- 답변은 반드시 순수한 C 코드만 포함해야 하며 Markdown 코드블록을 사용하지 마세요.\n"
-                "- 함수 시그니처, 인덴트, 주석 스타일을 유지하면서 필요한 가드만 추가하세요.\n"
-                "- 취약 지문(시그니처)에 등장하는 변수/포인터 이름을 그대로 사용하는 방어 로직을 우선적으로 추가하세요.\n"
-                "- TODO, placeholder, '...' 등의 불완전한 텍스트를 포함하지 마세요."
+                "- Your response must contain only pure C code; do not use Markdown code blocks.\n"
+                "- Maintain function signatures, indentation, and comment styles while adding only necessary guards.\n"
+                "- Prioritize adding defensive logic that uses variable/pointer names from the vulnerable signature.\n"
+                "- Do not include incomplete text such as TODO, placeholders, or '...'."
             )
         if provider == "claude-haiku-4-5":
             return (
-                "- 패치는 기존 흐름을 보존하면서 필요한 최소 변경만 수행하세요.\n"
-                "- NULL/범위 검사를 추가할 때는 기존 오류 처리 경로(리턴 코드, 로그)를 유지합니다."
+                "- The patch should preserve existing flow while making only minimal necessary changes.\n"
+                "- When adding NULL/range checks, maintain existing error handling paths (return codes, logs)."
             )
         return None
 
@@ -758,32 +794,32 @@ class LLMClient:
             Formatted prompt string
         """
         # Header section (same for all conditions)
-        prompt = "# 보안 패치 작성\n\n"
-        prompt += "## 역할\n"
-        prompt += "당신은 C 프로그램의 보안 취약점을 수정하는 전문가입니다.\n\n"
+        prompt = "# Security Patch Generation\n\n"
+        prompt += "## Role\n"
+        prompt += "You are an expert in fixing security vulnerabilities in C programs.\n\n"
 
         # Vulnerable code section (same for all conditions)
-        prompt += "## 취약한 코드\n"
+        prompt += "## Vulnerable Code\n"
         prompt += "```c\n"
         prompt += original_code.strip()
         prompt += "\n```\n\n"
-        prompt += f"**취약점 시그니처**: `{vulnerability_signature}`\n\n"
+        prompt += f"**Vulnerability Signature**: `{vulnerability_signature}`\n\n"
 
         # Specification section (condition-dependent)
         if spec_level:
             prompt += spec_level.content + "\n\n"
 
         # Output requirements (same for all conditions)
-        prompt += "## 출력\n"
-        prompt += "다음 두 가지를 제공하세요:\n\n"
-        prompt += "1. **수정된 C 코드**:\n"
-        prompt += "   - 취약점을 제거하는 최소한의 변경\n"
-        prompt += "   - 주석이나 마크다운 코드 블록 없이 순수 C 코드만\n"
-        prompt += "   - 함수 시그니처와 기존 동작을 유지\n\n"
-        prompt += "2. **설명**:\n"
-        prompt += "   - 취약점이 발생한 원인 (어떤 조건에서 문제가 발생하는가)\n"
-        prompt += "   - 패치가 취약점을 수정하는 방식 (어떤 변경이 어떻게 작동하는가)\n"
-        prompt += "   - 인과 관계 (왜 이 변경이 문제를 해결하는가)\n"
+        prompt += "## Output\n"
+        prompt += "Please provide the following two items:\n\n"
+        prompt += "1. **Fixed C Code**:\n"
+        prompt += "   - Minimal changes that eliminate the vulnerability\n"
+        prompt += "   - Pure C code only, without comments or markdown code blocks\n"
+        prompt += "   - Preserve the function signature and existing behavior\n\n"
+        prompt += "2. **Explanation**:\n"
+        prompt += "   - Root cause: What caused the vulnerability (under what conditions does the problem occur)\n"
+        prompt += "   - Fix mechanism: How the patch fixes the vulnerability (what changes work and how)\n"
+        prompt += "   - Causal reasoning: Why this change solves the problem\n"
 
         return prompt
 
@@ -881,9 +917,9 @@ class LLMClient:
             body = "\n\n".join(part for part in body_parts if part)
         guideline_block = (
             "\n\nPatch guidelines:\n"
-            "- 함수 시그니처와 반환 경로를 유지하고, 필요한 경우 가드/검증 로직을 추가하세요.\n"
-            "- 취약 지문에 등장한 버퍼/포인터/사이즈 변수를 그대로 참조하여 경계·NULL 검사를 넣으세요.\n"
-            "- 기존 오류 처리(로그, 리턴코드)를 삭제하지 말고, 새 검사에서도 동일 규약을 따르세요."
+            "- Maintain function signature and return paths, adding guard/validation logic as needed.\n"
+            "- Add boundary/NULL checks by directly referencing buffer/pointer/size variables from the vulnerability signature.\n"
+            "- Preserve existing error handling (logs, return codes), following the same conventions in new checks."
         )
         if options.include_guidelines:
             body += guideline_block
@@ -991,62 +1027,107 @@ Evaluate both explanations on the following dimensions (1-5 scale, where 5 is be
 **Question:** Can a developer understand HOW the patch works and what it covers?
 
 **Criteria:**
-- **Code Changes** (1.5 pts): Does it precisely describe what code was added/modified/deleted?
-  - Example: "Lines 10-12: if (IS_ERR(dir)) return PTR_ERR(dir);"
-  - Must include actual code or line numbers
-- **Mechanism** (2.0 pts): Does it explain how the patch prevents the vulnerability?
-  - Example: "IS_ERR() check causes early return, preventing NULL dereference"
-  - Must explain control flow or data flow changes
-- **Completeness Coverage** (1.5 pts): Does it explain whether the patch covers ALL vulnerability instances?
-  - ✅ EXCELLENT: "Patch adds checks at all 3 strcpy calls (lines 10, 15, 20) that use user input"
-  - ✅ GOOD: "Patch handles the main vulnerability path but doesn't cover edge case X"
-  - ❌ WEAK: Only describes one code change without discussing coverage
-  - **Explanations with full causal analysis** can identify complete vs partial fixes
-  - **Post-hoc explanations** often miss whether patch is complete → reduce score if unclear
+- **Code Change Coverage** (2.0 pts): Does it describe **ALL** code changes made by the patch?
+  - ✅ EXCELLENT (2.0 pts): "Patch adds 3 changes: (1) Line 10: `if (!buf) return -ENOMEM;` (2) Line 15: `if (len >= sizeof(buf)) len = sizeof(buf)-1;` (3) Line 20: `buf[len] = '\0';`"
+  - ✅ GOOD (1.5 pts): "Patch adds NULL check at Line 10 and size validation at Line 15"
+  - ⚠️ PARTIAL (0.5-1.0 pts): "Patch adds a check" (which check? how many? where?)
+  - ❌ WEAK (0 pts): "The patch fixes the code"
 
-**Scoring:**
-- 5: Code Changes + Mechanism + Complete coverage analysis
-- 4: Code Changes + Mechanism clear; coverage partially discussed
-- 3: Code Changes + Mechanism; no coverage discussion
-- 2: Only Code Changes or Mechanism (not both)
-- 1: Vague or incomplete patch description
+  **CRITICAL**: If the patch makes N changes but explanation only describes < N changes → score ≤ 1.5
 
-**RED FLAGS (reduce to 1-2):**
-- Lists code changes without explaining their purpose
+  **MUST include**: Line numbers or locations + What was added/modified/deleted
+
+- **Mechanism** (2.0 pts): Does it explain HOW each change prevents the vulnerability?
+  - ✅ EXCELLENT (2.0 pts): "The `if (!idev)` check at Line 8 causes early return with error code, preventing execution from reaching the dereference `idev->cnf` at Line 12. Control flow: error path exits before vulnerable operation."
+  - ✅ GOOD (1.5 pts): "NULL check prevents reaching the dereference"
+  - ⚠️ PARTIAL (0.5 pts): "Check prevents the bug"
+  - Must explain control flow OR data flow changes
+
+- **Completeness Analysis** (1.0 pt): Does it assess whether the patch is complete or partial?
+  - ✅ EXCELLENT (1.0 pt): "Patch fully addresses the vulnerability by adding checks at all 3 user input paths (lines 10, 15, 20). No other unguarded uses of user data exist in this function."
+  - ✅ GOOD (0.7 pt): "Patch handles the main path but potential edge case at Line 25 remains"
+  - ⚠️ PARTIAL (0.3 pt): Mentions "patch fixes the issue" without analysis
+  - ❌ NONE (0 pt): No discussion of completeness
+
+  **Explanations with causal analysis** can better assess completeness by checking if all causal paths are blocked.
+  **Post-hoc explanations** typically cannot assess this → if unclear, score ≤ 0.5
+
+**Scoring Guidelines:**
+- **5.0**: All code changes identified + Clear mechanism for each + Completeness analysis
+- **4.0-4.5**: All code changes + Clear mechanism; completeness partially discussed
+- **3.0-3.5**: Most code changes + Mechanism; no completeness discussion
+- **2.0-2.5**: Some code changes OR mechanism (not both); no completeness
+- **1.0-1.5**: Vague patch description with minimal details
+- **0.5**: "Patch fixes it" with no specifics
+
+**MANDATORY PENALTIES:**
+- ⛔ **Missing code changes** (describes 1 out of 3 changes) → maximum score 2.5
+- ⛔ **No line numbers or locations** → maximum score 3.0
+- ⛔ **No mechanism explanation** → maximum score 2.5
+- ⛔ **No completeness discussion** → maximum score 4.0
+
+**RED FLAGS:**
+- Lists code changes as dry inventory without explaining their purpose
 - No discussion of whether patch fully resolves the vulnerability
+- Describes patch in isolation without connecting to vulnerability
 
 ---
 
 ### 3. Causal Connection (1-5)
 **Question:** Can a developer understand WHY this patch solves the vulnerability?
 
-**This is the MOST IMPORTANT dimension**. Strong causal explanations require explicit code-level reasoning with concrete paths.
+**This is the MOST IMPORTANT dimension**. Strong causal explanations require explicit code-level reasoning with concrete paths showing the vulnerability's propagation BEFORE analyzing the patch.
 
 **Criteria:**
-- **Concrete Causal Path** (2.5 pts): Does it trace the vulnerability through **specific code locations**?
-  - ✅ EXCELLENT: "Line 5: user input → Line 10: strcpy without bounds check → Line 15: buffer overflow"
-  - ✅ GOOD: "input flows to strcpy(buf, user_data) → no size check → overflow"
-  - ❌ WEAK: "input is not validated properly, causing overflow"
-  - **MUST include**: Variable names, function names, or line numbers
-  - **Post-hoc explanations** (written after seeing the patch) typically lack this depth → score ≤ 2
-- **Intervention Mechanism** (1.5 pts): Does it explain HOW the patch breaks the causal path?
-  - ✅ EXCELLENT: "strlen() check at Line 8 blocks oversized input, preventing strcpy overflow at Line 10"
-  - ❌ WEAK: "patch validates input to prevent overflow"
-  - **MUST explain**: Which step in the causal path is blocked/fixed
-- **Counterfactual Reasoning** (1.0 pt): Does it contrast behavior with/without the patch?
-  - Example: "Without patch: unchecked input → overflow; With patch: size check → early return"
+- **Concrete Causal Path** (2.5 pts): Does it trace the vulnerability through **specific code locations with variable names and line numbers**?
+  - ✅ EXCELLENT (2.5 pts): "At line 45, unchecked index `i` is used in `array[i]`. If `i >= array_size` (from line 40 input), this causes OOB access at line 45. The vulnerability path: Line 40 (user input) → Line 42 (no validation) → Line 45 (OOB write)"
+  - ✅ GOOD (1.5-2.0 pts): "`strcpy(buf, user_input)` at Line 10 has no bounds check. If `user_input` length > 256 (buf size), overflow occurs."
+  - ⚠️ PARTIAL (0.5-1.0 pts): "Buffer overflow occurs when input is large" (missing line numbers, variable names)
+  - ❌ WEAK (0 pts): "The vulnerability occurs due to missing validation" (pure abstraction, no code details)
 
-**Scoring:**
-- 5: Concrete causal path with code locations + Clear intervention mechanism + Counterfactual reasoning
-- 4: Concrete causal path + Intervention mechanism (counterfactual optional)
-- 3: Partial causal path (some code details) + Basic intervention explanation
-- 2: High-level causal claim without concrete code paths (typical of post-hoc explanations)
-- 1: No causal reasoning or incorrect causal chain
+  **CRITICAL**: **Post-hoc explanations** that only describe the patch's effect (e.g., "NULL check prevents crash") WITHOUT analyzing the original vulnerability path → **maximum 0.8 pt**
 
-**RED FLAGS (reduce to 1-2):**
-- Explanation says "fix the vulnerability" without explaining the causal mechanism
-- No mention of specific variables, functions, or control flow
-- Generic security advice without connecting to this specific code
+  **MUST include for score > 1.5:**
+  1. Specific variable names (e.g., `idev`, `buf`, `strlen(src)`)
+  2. Line numbers or function names (e.g., "Line 45", "in addrconf_disable_ipv6()")
+  3. The propagation sequence (A → B → C)
+
+- **Intervention Mechanism** (1.5 pts): Does it explain HOW the patch breaks the causal path and WHY this location is chosen?
+  - ✅ EXCELLENT (1.5 pts): "The patch adds `if (i >= size) return -1;` at Line 44, BEFORE the array access at Line 45. This blocks the causal path by preventing untrusted `i` from reaching the vulnerable array indexing operation. This location is optimal because it's the last point before the vulnerability occurs."
+  - ⚠️ PARTIAL (0.5 pts): "Patch adds size check to prevent overflow" (no location, no mechanism)
+  - ❌ WEAK (0 pts): "Patch fixes the issue by validating input"
+
+  **MUST explain**: Which specific step in the causal path is blocked + Why this intervention point is effective
+
+- **Counterfactual Reasoning** (1.0 pt): Does it contrast behavior with/without the patch using concrete examples?
+  - ✅ EXCELLENT: "Without patch: `i=300` (from input) → `array[300]` → OOB write. With patch: `i=300` → `if (i >= 256)` → early return → no OOB."
+  - ⚠️ PARTIAL: "Patch prevents overflow by checking size"
+
+**Scoring Guidelines:**
+- **5.0**: Complete causal path (variables + lines + sequence) + Intervention mechanism with location + Counterfactual
+- **4.0-4.5**: Complete causal path + Clear intervention mechanism (counterfactual optional)
+- **3.0-3.5**: Partial causal path (some code details) + Basic intervention explanation
+- **2.0-2.5**: High-level causal claim with minimal code details (typical of simple post-hoc explanations)
+- **1.0-1.5**: Only CWE classification or "fix prevents X" without any code-level path
+- **0.5**: Incorrect or meaningless causal reasoning
+
+**MANDATORY PENALTIES (apply these strictly):**
+- ⛔ **No variable names or line numbers** → maximum score 1.5
+- ⛔ **Post-hoc only** (describes patch effect, not original vulnerability propagation) → maximum score 1.0
+- ⛔ **No intervention mechanism** (doesn't explain which causal step is blocked) → maximum score 2.0
+- ⛔ **Generic terms only** ("improper validation", "insecure code") without specifics → maximum score 1.0
+- ⛔ **Missing propagation sequence** (doesn't show A → B → C flow) → maximum score 2.0
+
+**Examples of scoring:**
+
+**Score 4.5-5.0:**
+"The vulnerability path: Line 120 receives `user_len` from input → Line 125 uses `memcpy(dst, src, user_len)` without checking `user_len <= dst_size` → If `user_len > 256`, Line 125 writes beyond `dst` boundary.
+
+The patch adds `if (user_len > sizeof(dst)) return -EINVAL;` at Line 123, BEFORE the memcpy. This blocks the path by rejecting oversized lengths before they reach the vulnerable operation. Without patch: user_len=500 → memcpy(dst, src, 500) → 244-byte overflow. With patch: user_len=500 → early return → no overflow."
+
+**Score 0.8-1.0 (typical post-hoc):**
+"Buffer overflow happens due to insufficient validation. The patch adds a NULL check which prevents the crash."
+(Reason: No variable names, no line numbers, describes patch effect only, doesn't explain original causal path - MAXIMUM 1.0 due to post-hoc penalty)
 
 ---
 

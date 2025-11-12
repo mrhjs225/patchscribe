@@ -45,59 +45,59 @@ class ActionableSpecGenerator:
         """Initialize action templates for different intervention types"""
         return {
             "boundary_check": {
-                "description": "배열/버퍼 접근 전에 경계 검사를 추가하세요",
-                "description_with_location": "줄 {line} 근처에서 배열/버퍼 접근 전에 경계 검사를 추가하세요",
-                "guideline": "배열 인덱스가 사용되기 전에 검증이 필요합니다 (줄 {line} 근처 참고)",
-                "rationale": "경계를 벗어난 접근을 방지하여 버퍼 오버플로우를 차단합니다",
-                "code_hint": "조건: {variable} < {bound} 또는 {variable} >= 0 && {variable} < {bound}"
+                "description": "Add boundary check before array/buffer access",
+                "description_with_location": "Add boundary check before array/buffer access near line {line}",
+                "guideline": "Validate that array/buffer index does not exceed bounds (vulnerable operation is near line {line})",
+                "rationale": "Prevents out-of-bounds access to block buffer overflow",
+                "code_hint": "Condition: {variable} < {bound} or {variable} >= 0 && {variable} < {bound}"
             },
             "null_check": {
-                "description": "포인터 사용 전에 NULL 검사를 추가하세요",
-                "description_with_location": "줄 {line} 근처에서 포인터 사용 전에 NULL 검사를 추가하세요",
-                "guideline": "포인터 역참조 전에 NULL 검사가 필요합니다 (줄 {line} 근처 참고)",
-                "rationale": "NULL 포인터 역참조를 방지합니다",
-                "code_hint": "조건: {variable} != NULL"
+                "description": "Add NULL check before pointer use",
+                "description_with_location": "Add NULL check before pointer use near line {line}",
+                "guideline": "Ensure pointer is non-NULL before dereferencing (vulnerable dereference is near line {line})",
+                "rationale": "Prevents NULL pointer dereference",
+                "code_hint": "Condition: {variable} != NULL"
             },
             "length_check": {
-                "description": "버퍼 쓰기 전에 충분한 공간이 있는지 확인하세요",
-                "description_with_location": "줄 {line} 근처에서 버퍼 크기를 확인하세요",
-                "guideline": "버퍼 쓰기 작업 전에 크기 검증이 필요합니다 (줄 {line} 근처 참고)",
-                "rationale": "버퍼 오버플로우를 방지하기 위해 쓰기 전에 충분한 공간이 있는지 확인합니다",
-                "code_hint": "조건: available_space >= required_space"
+                "description": "Verify sufficient space before buffer write",
+                "description_with_location": "Verify buffer size near line {line}",
+                "guideline": "Validate that buffer write does not exceed allocated size (vulnerable write is near line {line})",
+                "rationale": "Ensures sufficient space before write to prevent buffer overflow",
+                "code_hint": "Condition: available_space >= required_space"
             },
             "sanitize": {
-                "description": "입력값을 검증하고 정제하세요",
-                "description_with_location": "줄 {line} 근처에서 입력값을 검증하고 정제하세요",
-                "guideline": "외부 입력이 사용되기 전에 검증이 필요합니다 (줄 {line} 근처 참고)",
-                "rationale": "유효하지 않거나 악의적인 입력을 차단합니다",
-                "code_hint": "유효하지 않은 값은 거부하거나 안전한 기본값으로 대체하세요"
+                "description": "Validate and sanitize input values",
+                "description_with_location": "Validate and sanitize input near line {line}",
+                "guideline": "Validate that external input contains only safe values (vulnerable input use is near line {line})",
+                "rationale": "Blocks invalid or malicious input",
+                "code_hint": "Reject invalid values or replace with safe defaults"
             },
             "range_check": {
-                "description": "값이 유효한 범위 내에 있는지 확인하세요",
-                "description_with_location": "줄 {line} 근처에서 값이 유효한 범위 내에 있는지 확인하세요",
-                "guideline": "값이 사용되기 전에 범위 검증이 필요합니다 (줄 {line} 근처 참고)",
-                "rationale": "범위를 벗어난 값 사용을 방지합니다",
-                "code_hint": "조건: min_value <= {variable} <= max_value"
+                "description": "Verify value is within valid range",
+                "description_with_location": "Verify value is within valid range near line {line}",
+                "guideline": "Validate that value does not exceed allowed range (vulnerable use is near line {line})",
+                "rationale": "Prevents use of out-of-range values",
+                "code_hint": "Condition: min_value <= {variable} <= max_value"
             },
             "overflow_check": {
-                "description": "정수 오버플로우 가능성을 확인하세요",
-                "description_with_location": "줄 {line} 근처에서 정수 오버플로우 가능성을 확인하세요",
-                "guideline": "산술 연산 전에 오버플로우 검사가 필요합니다 (줄 {line} 근처 참고)",
-                "rationale": "산술 연산 결과가 타입의 범위를 벗어나지 않도록 합니다",
-                "code_hint": "연산 전에 결과값이 MAX/MIN을 초과하지 않는지 확인하세요"
+                "description": "Check for potential integer overflow",
+                "description_with_location": "Check for integer overflow near line {line}",
+                "guideline": "Validate that arithmetic result does not exceed type bounds (vulnerable operation is near line {line})",
+                "rationale": "Ensures arithmetic results stay within type bounds",
+                "code_hint": "Verify result does not exceed MAX/MIN before operation"
             },
             "size_validation": {
-                "description": "크기 인자가 음수가 아닌지 확인하세요",
-                "description_with_location": "줄 {line} 근처에서 크기 인자가 음수가 아닌지 확인하세요",
-                "guideline": "크기 값이 사용되기 전에 유효성 검증이 필요합니다 (줄 {line} 근처 참고)",
-                "rationale": "음수 크기 값으로 인한 예상치 못한 동작을 방지합니다",
-                "code_hint": "조건: size >= 0"
+                "description": "Verify size argument is non-negative",
+                "description_with_location": "Verify size argument is non-negative near line {line}",
+                "guideline": "Validate that size value is in valid range (>= 0) (vulnerable use is near line {line})",
+                "rationale": "Prevents unexpected behavior from negative size values",
+                "code_hint": "Condition: size >= 0"
             },
             "guard": {
-                "description": "안전 조건을 만족하지 않으면 조기 반환하세요",
-                "description_with_location": "줄 {line} 근처에서 안전 조건을 만족하지 않으면 조기 반환하세요",
-                "guideline": "위험한 코드 경로 진입 전에 안전 검사가 필요합니다 (줄 {line} 근처 참고)",
-                "rationale": "위험한 코드 경로의 실행을 방지합니다",
+                "description": "Add early return if safety condition fails",
+                "description_with_location": "Add early return if safety condition fails near line {line}",
+                "guideline": "Check safety condition before entering dangerous code path (dangerous path is near line {line})",
+                "rationale": "Prevents execution of dangerous code paths",
                 "code_hint": "if (unsafe_condition) {{ return error_code; }}"
             }
         }
@@ -140,8 +140,8 @@ class ActionableSpecGenerator:
         # Format description
         description = description_template.format(
             line=intervention.target_line,
-            variable=variables.get("target", "변수"),
-            bound=variables.get("bound", "배열 크기")
+            variable=variables.get("target", "variable"),
+            bound=variables.get("bound", "array_size")
         )
 
         # Format rationale
@@ -237,12 +237,12 @@ class ActionableSpecGenerator:
         explanation_parts = []
 
         # Format 1: Visual flow diagram
-        explanation_parts.append("**인과 흐름 다이어그램:**")
+        explanation_parts.append("**Causal Flow Diagram:**")
         flow = " → ".join([self._humanize_node(node) for node in path.nodes])
         explanation_parts.append(f"  {flow}\n")
 
         # Format 2: Detailed step-by-step
-        explanation_parts.append("**단계별 분석:**")
+        explanation_parts.append("**Step-by-Step Analysis:**")
         for i, node in enumerate(path.nodes, 1):
             humanized = self._humanize_node(node)
             explanation_parts.append(f"  {i}. {humanized}")
@@ -251,36 +251,36 @@ class ActionableSpecGenerator:
             if hasattr(path, 'node_details') and node in path.node_details:
                 details = path.node_details[node]
                 if details.get('location'):
-                    explanation_parts.append(f"     - 위치: {details['location']}")
+                    explanation_parts.append(f"     - Location: {details['location']}")
                 if details.get('variable'):
-                    explanation_parts.append(f"     - 변수: {details['variable']}")
+                    explanation_parts.append(f"     - Variable: {details['variable']}")
 
         # Format 3: Summary and implications
-        explanation_parts.append(f"\n**설명:** {path.description}")
-        explanation_parts.append("\n**패치 요구사항:** 위 인과 경로 중 최소 한 단계를 차단하여 취약점 발현을 방지해야 합니다.")
+        explanation_parts.append(f"\n**Explanation:** {path.description}")
+        explanation_parts.append("\n**Patch Requirement:** At least one step in the above causal path must be blocked to prevent vulnerability manifestation.")
 
         return "\n".join(explanation_parts)
 
     def _humanize_node(self, node_id: str) -> str:
         """Convert technical node ID to human-readable description"""
-        # Mapping of common technical terms to Korean
+        # Mapping of common technical terms to English
         humanization_map = {
-            "unchecked_input": "검증되지 않은 입력",
-            "buffer_overflow": "버퍼 오버플로우",
-            "null_deref": "NULL 포인터 역참조",
-            "oob_access": "배열 경계 초과 접근",
-            "oob_write": "경계 밖 쓰기",
-            "oob_read": "경계 밖 읽기",
-            "memory_corruption": "메모리 손상",
-            "use_after_free": "해제 후 사용",
-            "double_free": "이중 해제",
-            "integer_overflow": "정수 오버플로우",
-            "format_string": "포맷 스트링 취약점",
-            "injection": "인젝션 공격",
-            "unvalidated": "검증 안됨",
-            "untrusted": "신뢰할 수 없는",
-            "tainted": "오염된",
-            "unchecked": "확인 안됨",
+            "unchecked_input": "Unchecked Input",
+            "buffer_overflow": "Buffer Overflow",
+            "null_deref": "NULL Pointer Dereference",
+            "oob_access": "Out-of-Bounds Access",
+            "oob_write": "Out-of-Bounds Write",
+            "oob_read": "Out-of-Bounds Read",
+            "memory_corruption": "Memory Corruption",
+            "use_after_free": "Use After Free",
+            "double_free": "Double Free",
+            "integer_overflow": "Integer Overflow",
+            "format_string": "Format String Vulnerability",
+            "injection": "Injection Attack",
+            "unvalidated": "Unvalidated",
+            "untrusted": "Untrusted",
+            "tainted": "Tainted",
+            "unchecked": "Unchecked",
         }
 
         # Try exact match first
@@ -306,25 +306,25 @@ class ActionableSpecGenerator:
             Detailed explanation of why these interventions are chosen
         """
         if not interventions:
-            return "명시적인 수정 지침이 없습니다."
+            return "No explicit fix instructions available."
 
         analysis_parts = []
-        analysis_parts.append("**개입 지점 분석:**\n")
+        analysis_parts.append("**Intervention Point Analysis:**\n")
 
         for i, intv in enumerate(interventions, 1):
             action_type = self._infer_action_type(intv)
             type_names = {
-                "boundary_check": "경계 검사", "null_check": "NULL 검사",
-                "length_check": "길이 검사", "sanitize": "입력 검증",
-                "range_check": "범위 검사", "overflow_check": "오버플로우 검사",
-                "size_validation": "크기 검증", "guard": "안전 가드"
+                "boundary_check": "Boundary Check", "null_check": "NULL Check",
+                "length_check": "Length Check", "sanitize": "Input Validation",
+                "range_check": "Range Check", "overflow_check": "Overflow Check",
+                "size_validation": "Size Validation", "guard": "Safety Guard"
             }
             action_name = type_names.get(action_type, action_type)
 
-            analysis_parts.append(f"{i}. **개입 위치**: 줄 {intv.target_line} 근처")
-            analysis_parts.append(f"   - **개입 유형**: {action_name}")
-            analysis_parts.append(f"   - **이유**: {intv.rationale if intv.rationale else '인과 경로를 차단하기 위함'}")
-            analysis_parts.append(f"   - **최소 개입 원칙**: 이 지점은 취약점 경로를 차단하는 가장 효과적인 위치입니다.\n")
+            analysis_parts.append(f"{i}. **Intervention Location**: Near line {intv.target_line}")
+            analysis_parts.append(f"   - **Intervention Type**: {action_name}")
+            analysis_parts.append(f"   - **Reason**: {intv.rationale if intv.rationale else 'To block the causal path'}")
+            analysis_parts.append(f"   - **Minimal Intervention Principle**: This point is the most effective position to block the vulnerability path.\n")
 
         return "\n".join(analysis_parts)
 
@@ -339,7 +339,7 @@ class ActionableSpecGenerator:
             Concise summary of what needs to be done
         """
         if not interventions:
-            return "명시적인 수정 지침이 없습니다."
+            return "No explicit fix instructions available."
 
         # Count intervention types
         type_counts = {}
@@ -351,21 +351,21 @@ class ActionableSpecGenerator:
         summary_parts = []
 
         type_names = {
-            "boundary_check": "경계 검사",
-            "null_check": "NULL 검사",
-            "length_check": "길이 검사",
-            "sanitize": "입력 검증",
-            "range_check": "범위 검사",
-            "overflow_check": "오버플로우 검사",
-            "size_validation": "크기 검증",
-            "guard": "안전 가드"
+            "boundary_check": "Boundary Check",
+            "null_check": "NULL Check",
+            "length_check": "Length Check",
+            "sanitize": "Input Validation",
+            "range_check": "Range Check",
+            "overflow_check": "Overflow Check",
+            "size_validation": "Size Validation",
+            "guard": "Safety Guard"
         }
 
         for action_type, count in type_counts.items():
             name = type_names.get(action_type, action_type)
-            summary_parts.append(f"{name} {count}개")
+            summary_parts.append(f"{count} {name}(s)")
 
-        summary = "필요한 수정: " + ", ".join(summary_parts)
+        summary = "Required fixes: " + ", ".join(summary_parts)
         return summary
 
 

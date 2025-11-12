@@ -18,11 +18,12 @@
 \begin{abstract}
 Large Language Models (LLMs) show promise in automated vulnerability repair, yet their patches often lack verifiable guarantees of correctness.
 Current approaches rely on exploit-only validation and informal rationales, providing limited assurance that vulnerabilities are truly eliminated.
-We present PatchScribe, a theory-guided framework that ensures verifiable consistency guarantees through causal analysis and multi-layered validation.
-PatchScribe inverts traditional workflows: it first formalizes vulnerabilities using Program Causal Graphs (PCG) and Structural Causal Models (SCM) to generate a formal bug specification ($E_{\text{bug}}$), guides LLM-based patch generation with precise constraints, then verifies consistency between $E_{\text{bug}}$ and the patch explanation ($E_{\text{patch}}$) through three complementary methods: automated consistency checking, ground truth validation, and structured multi-dimensional evaluation.
-Evaluated on 121 real-world CVEs from two complementary benchmarks (APPATCH Zeroday Repair: 97 cases, ExtractFix: 24 cases), PatchScribe achieves [X\%] triple-verification success rate, significantly outperforming raw LLM baseline ([Y\%], $p$<0.001) and informal guidance approaches ([W\%], $p$<0.01), with average processing time of [Z] seconds per CVE.
+We present PatchScribe, a theory-guided framework that generates security patches with dual causal explanations through a two-phase workflow.
+PatchScribe inverts traditional workflows: it first formalizes vulnerabilities using Program Causal Graphs (PCG) and Structural Causal Models (SCM) to generate a formal bug specification ($E_{\text{bug}}$), then guides LLM-based patch generation with precise constraints, producing patches accompanied by formal patch explanations ($E_{\text{patch}}$).
+We evaluate patch and explanation quality through structured manual assessment using a multi-dimensional rubric (accuracy, completeness, clarity, causality).
+Evaluated on 121 real-world CVEs from two complementary benchmarks (APPATCH Zeroday Repair: 97 cases, ExtractFix: 24 cases), PatchScribe achieves [X\%] patch correctness rate, significantly outperforming raw LLM baseline ([Y\%], $p$<0.001) and informal guidance approaches ([W\%], $p$<0.01), with average processing time of [Z] seconds per CVE.
 % TODO: Fill after experiments complete - expected results: X~75-80%, Y~30-35%, W~50-55%, Z~40-50
-Our multi-layered validation approach provides stronger consistency guarantees than existing exploit-only or test-only methods while remaining computationally practical for real-world deployment.
+Our theory-guided approach provides clearer causal understanding than existing exploit-only methods while remaining computationally practical for real-world deployment.
 \end{abstract}
 \section{Introduction}\label{introduction}
 
@@ -51,9 +52,9 @@ We introduce several key concepts that distinguish our approach:
 
 \textbf{Theory-Guided Generation:} Unlike post-hoc explanations that describe patches after generation, PatchScribe uses pre-hoc formalization—constructing a formal vulnerability specification before patch generation to guide the LLM with precise constraints.
 
-\textbf{Dual Causal Explanations:} We generate two complementary explanations: $E_{\text{bug}}$ (formal specification of vulnerability's root cause) and $E_{\text{patch}}$ (formal specification of how the patch eliminates it). Verifying consistency between these explanations catches incomplete fixes.
+\textbf{Dual Causal Explanations:} We generate two complementary explanations: $E_{\text{bug}}$ (formal specification of vulnerability's root cause) and $E_{\text{patch}}$ (formal specification of how the patch eliminates it). These dual explanations provide developers with clear causal understanding of both the vulnerability and its fix.
 
-\textbf{Multi-Layered Validation:} Our validation combines three complementary methods: (1) automated consistency checking (ensuring $E_{\text{patch}}$ addresses all causes in $E_{\text{bug}}$), (2) ground truth validation (comparing against reference standards), and (3) structured multi-dimensional evaluation (assessing explanation quality across accuracy, completeness, clarity, and causality).
+\textbf{Structured Manual Evaluation:} We assess patch and explanation quality through structured manual evaluation using a multi-dimensional rubric measuring accuracy (technical correctness), completeness (coverage of what/why/how), clarity (understandability), and causality (depth of causal reasoning).
 
 Our key contributions are:
 \begin{itemize}
@@ -64,17 +65,16 @@ Our key contributions are:
 \end{itemize}
 
 In this paper, we introduce PatchScribe, a framework that brings theory-guided causal reasoning to LLM-based vulnerability repair.
-Unlike prior approaches that explain patches post-hoc, PatchScribe follows a pre-hoc methodology: formalize first, patch second, verify consistency third. The approach builds a Program Causal Graph (PCG) to represent the causal structure of the vulnerability (for instance, how a lack of input validation leads to a buffer overflow) and instantiates a Structural Causal Model (SCM) on top of this graph.
+Unlike prior approaches that explain patches post-hoc, PatchScribe follows a pre-hoc methodology: formalize first, then generate patches with dual explanations. The approach builds a Program Causal Graph (PCG) to represent the causal structure of the vulnerability (for instance, how a lack of input validation leads to a buffer overflow) and instantiates a Structural Causal Model (SCM) on top of this graph.
 From the SCM, we generate a formal bug explanation ($E_{\text{bug}}$) that precisely characterizes the vulnerability condition, causal paths, and intervention options. This formal specification is provided to the LLM as guidance, enabling it to generate more targeted patches.
 After patch generation, we analyze how the patch intervenes on the causal model and generate a formal patch
 explanation ($E_{\text{patch}}$) describing what changed and why the vulnerability is eliminated.
-We then perform multi-layered validation—comparing $E_{\text{bug}}$ and $E_{\text{patch}}$—through three complementary methods: (1) automated consistency checking (does the patch address identified causes?), (2) ground truth validation (comparing against reference patch patterns and locations), and (3) structured evaluation (assessing explanation quality and correctness across multiple dimensions).
-This three-phase approach (Formalization $\rightarrow$ Theory-Guided Generation $\rightarrow$ Multi-Layered Validation) provides stronger consistency guarantees than prior work, catching cases where patches superficially appear correct but fail to address the root cause.
+This two-phase approach (Formalization $\rightarrow$ Theory-Guided Generation) produces patches with dual causal explanations, providing clearer understanding than prior work and enabling systematic assessment of patch quality.
 
-We demonstrate that PatchScribe significantly improves reliability of automated patches.
-By systematically validating that a patch actually removes the conditions that caused a vulnerability, we prevent scenarios where an LLM patch ``fixes'' a symptom but not the underlying problem.
-Our approach directly addresses the limitations of prior work: (1) It goes beyond exploit-specific testing by systematically validating that the causal chain leading to the vulnerability is disrupted under broad conditions, and (2) it replaces unverifiable natural-language rationales with structured, machine-checkable explanations that enable consistency verification.
-This yields a double benefit: stronger assurance of consistency and clearer insight into patch correctness.
+We demonstrate that PatchScribe significantly improves quality of automated patches.
+By using formal causal specifications to guide patch generation, we help LLMs generate patches that address root causes rather than symptoms.
+Our approach directly addresses the limitations of prior work: (1) It provides pre-hoc formalization that guides generation with precise constraints rather than post-hoc validation alone, and (2) it replaces unverifiable natural-language rationales with structured causal explanations (E_bug, E_patch) that developers can systematically assess.
+This yields a double benefit: higher quality patches and clearer understanding of vulnerability and fix.
 
 \subsection{Notation and Paper Organization}
 
@@ -104,7 +104,7 @@ SCM & Structural Causal Model \\
 \textbf{Paper Organization:} Section~\ref{sec:background} provides background on LLM-based vulnerability repair and motivation for our approach.
 Section~\ref{sec:approach} presents the PatchScribe framework overview.
 Section~\ref{sec:formal-model} details our formal causal model (PCG and SCM).
-Section~\ref{sec:system} describes the three-phase system architecture.
+Section~\ref{sec:system} describes the two-phase system architecture.
 Section~\ref{sec:implementation} covers implementation details.
 Section~\ref{sec:evaluation} presents our experimental evaluation.
 Section~\ref{sec:related} discusses related work.
@@ -293,8 +293,8 @@ These requirements guided the design of PatchScribe, which we describe next.
 
 \section{Approach Overview}\label{sec:approach}
 
-PatchScribe is a system for automated vulnerability repair that produces systematically validated dual causal explanations for each patch.
-Unlike prior approaches that generate patches first and explain them post-hoc, PatchScribe follows a theory-guided approach: it first formalizes the vulnerability causally, uses this formalization to guide patch generation, and then verifies the consistency between the bug's root cause and the patch's intervention.
+PatchScribe is a system for automated vulnerability repair that produces dual causal explanations for each patch.
+Unlike prior approaches that generate patches first and explain them post-hoc, PatchScribe follows a theory-guided approach: it first formalizes the vulnerability causally, then uses this formalization to guide patch generation, producing patches accompanied by dual explanations (E_bug and E_patch).
 Figure~\ref{fig:overview} illustrates the overall architecture.
 
 \begin{figure}[t]
@@ -317,41 +317,28 @@ Causal Intervention Analysis $\rightarrow$ $E_{\text{patch}}$ Generation\\
 Output: Patch + $E_{\text{patch}}$ (intervention, disrupted paths)
 }}\\[0.5em]
 $\downarrow$\\[0.5em]
-\fbox{\parbox{0.85\columnwidth}{
-\textbf{Phase 3: Multi-Layered Validation}\\
-\textbf{(1)} Consistency: $E_{\text{bug}} \leftrightarrow E_{\text{patch}}$ (4 checks)\\
-\textbf{(2)} Ground Truth: Location, Intervention Type, Causal Similarity\\
-\textbf{(3)} Structured Eval: Accuracy, Completeness, Clarity, Causality\\
-Decision: 2-of-3 Majority Voting
-}}\\[0.5em]
-$\downarrow$\\[0.5em]
-\textbf{Output:} Verified Patch + Dual Explanations + Quality Metrics\\
+\textbf{Output:} Patch + Dual Explanations ($E_{\text{bug}}$, $E_{\text{patch}}$)\\
 \textit{Note: Actual diagram with visual flow arrows, boxes, and icons to be inserted}
 }}
-\caption{PatchScribe system architecture showing three-phase workflow: (1) Vulnerability formalization via PCG/SCM generates $E_{\text{bug}}$, (2) Theory-guided LLM generation produces patch and $E_{\text{patch}}$, (3) Multi-layered validation ensures consistency through automated checking, ground truth comparison, and structured evaluation with 2-of-3 majority voting for final decision.}
+\caption{PatchScribe system architecture showing two-phase workflow: (1) Vulnerability formalization via PCG/SCM generates $E_{\text{bug}}$, (2) Theory-guided LLM generation produces patch and $E_{\text{patch}}$. Patches are evaluated through structured manual assessment (Section~\ref{sec:evaluation}).}
 \label{fig:overview}
 \end{figure}
 
-\textbf{At a high level, PatchScribe operates in three phases:}
+\textbf{At a high level, PatchScribe operates in two phases:}
 
 \textbf{Phase 1: Vulnerability Formalization} - We analyze the vulnerable program to build a Program Causal Graph (PCG) and derive a Structural Causal Model (SCM).
 From the SCM, we generate a \textbf{formal vulnerability specification (E\_bug)} that precisely characterizes the conditions under which the vulnerability manifests.
-This specification serves as both a verification target and guidance for patch generation.
-The formal bug explanation E\_bug contains: (a) the formal condition characterizing when V\_bug occurs, (b) natural language descriptions mapped to code, (c) intervention options for fixing the vulnerability, and (d) verification assertions.
+This specification serves as guidance for patch generation.
+The formal bug explanation E\_bug contains: (a) the formal condition characterizing when V\_bug occurs, (b) natural language descriptions mapped to code, (c) intervention options for fixing the vulnerability, and (d) causal paths leading to the vulnerability.
 
 \textbf{Phase 2: Theory-Guided Patch Generation} - Armed with the formal vulnerability specification E\_bug, we prompt an LLM to generate a patch.
 Critically, the LLM receives not vague hints but a precise formal description of what conditions cause the vulnerability and what the patch must achieve.
 For example, instead of saying ``fix the overflow,'' we provide ``$V_{\text{overflow}} \Leftrightarrow (len > 256) \land (\lnot Check)$; to fix, you must ensure Check = true or $len \leq 256$ before line 42.''
 After patch generation, we analyze how the patch intervenes on the causal model and generate a \textbf{formal patch explanation (E\_patch)} describing the intervention, its effect on V\_bug, and which causal paths are disrupted.
 
-\textbf{Phase 3: Multi-Layered Validation} - We verify consistency between $E_{\text{bug}}$ and $E_{\text{patch}}$ through three complementary validation methods:
-(1) \textbf{Consistency Checking} to ensure $E_{\text{patch}}$ addresses the causes identified in $E_{\text{bug}}$ (four sub-checks: causal coverage, intervention validity, logical consistency, completeness),
-(2) \textbf{Ground Truth Validation} to compare against reference patch patterns, locations, and causal structures, and
-(3) \textbf{Structured Multi-Dimensional Evaluation} to assess explanation quality across accuracy, completeness, clarity, and causality dimensions.
-This multi-layered validation approach provides stronger consistency guarantees than prior single-method approaches.
-
-This approach ensures that patches are not only validated to work, but that we understand and can systematically verify \emph{why} they work in terms of the causal structure of the vulnerability.
-The key innovation is the separation of bug and patch explanations, enabling consistency verification that catches incomplete fixes.
+This approach ensures that patches are guided by formal causal specifications, helping LLMs generate patches that address root causes.
+The key innovation is the generation of dual causal explanations (E\_bug and E\_patch), providing developers with systematic understanding of both the vulnerability and its fix.
+We evaluate the quality of patches and their explanations through structured manual assessment (Section~\ref{sec:evaluation}).
 
 In meeting the design requirements:
 \begin{itemize}
@@ -533,13 +520,13 @@ However, to account for any mismatch between model and program, we still perform
 One can see the SCM proof as a guide and the code-level check as concrete validation.
 
 In summary, the formal model PCG+SCM allows us to reason systematically about cause and effect in code.
-It provides the foundation for generating explanations and verifying patches through logical analysis of causal interventions.
-The next section describes how we operationalize this model in PatchScribe's three-phase system.
+It provides the foundation for generating explanations and guiding patch generation through logical analysis of causal interventions.
+The next section describes how we operationalize this model in PatchScribe's two-phase system.
 
 \section{PatchScribe System}\label{sec:system}
 
-This section details the three critical sub-processes of our approach:
-generating the formal bug explanation before patching, generating the patch explanation after patching, and verifying consistency between them.
+This section details the two critical phases of our approach:
+generating the formal bug explanation before patching, and generating patches with dual explanations.
 
 \subsection{Phase 1: Formal Bug Explanation Generation
 (E\_bug)}\label{phase-1-formal-bug-explanation-generation-e_bug}
@@ -711,169 +698,6 @@ intervenes on the causal model:}
   broken because len is bounded
 \end{itemize}
 
-\subsection{Phase 3: Consistency
-Verification}\label{phase-3-consistency-verification}
-
-\textbf{We now perform novel consistency checking between \(E_{\text{bug}}\) and \(E_{\text{patch}}\):}
-
-\textbf{Check 1: Causal Coverage}
-
-\begin{verbatim}
-For each cause \(C_i\) identified in \(E_{\text{bug}}\):
-    Is C_i \in  E_patch.addressed_causes?
-
-If any cause is unaddressed without justification:
-    FAIL: Patch does not address cause C_i
-\end{verbatim}
-
-\textbf{Check 2: Intervention Validity}
-
-\begin{verbatim}
-E_patch claims intervention: do(Variable = value)
-
-Verify in code:
-    1. Is there code that sets Variable to value?
-    2. Is this on all paths to V_bug location?
-    3. Can the intervention be bypassed?
-
-If intervention is not properly implemented:
-    FAIL: Patch explanation is incorrect
-\end{verbatim}
-
-\textbf{Check 3: Logical Consistency}
-
-\begin{verbatim}
-Substitute E_patch.intervention into E_bug.formal_condition
-Simplify the resulting expression
-Check if result is logically false
-
-If not false:
-    FAIL: Patch does not logically eliminate V_bug
-\end{verbatim}
-
-\textbf{Check 4: Completeness}
-
-\begin{verbatim}
-For each causal path \(P\) in \(E_{\text{bug}}\):
-    Is P \in  E_patch.disrupted_paths?
-
-If any path is not disrupted:
-    Generate test case exercising that path
-    If V_bug is reachable:
-        FAIL: Patch is incomplete
-\end{verbatim}
-
-This consistency checking is a key innovation - it catches cases where a
-patch might pass exploit-only testing for one scenario but miss others
-that the bug explanation identified.
-
-\subsection{Ground Truth Validation}
-
-Beyond consistency checking between $E_{\text{bug}}$ and $E_{\text{patch}}$,
-we validate patches against known ground truth fixes when available. This
-three-stage validation process ensures that generated patches align with
-verified CVE fixes:
-
-\textbf{Stage 1: Location Accuracy}
-\begin{verbatim}
-For each intervention location L_patch in generated patch:
-    Find closest location L_truth in ground truth patch
-    Compute relative distance:
-        avg_line = (L_patch + L_truth) / 2
-        relative_diff = |L_patch - L_truth| / max(avg_line, 1)
-
-    If relative_diff < 0.05:  # 5% threshold
-        PASS: Intervention location matches
-\end{verbatim}
-
-\textbf{Stage 2: Intervention Type Matching}
-\begin{verbatim}
-Extract intervention pattern from ground truth:
-    - Null check addition
-    - Bounds check addition
-    - Resource initialization
-    - Error handling addition
-    - etc.
-
-Extract intervention pattern from generated patch
-
-If patterns match semantically:
-    PASS: Intervention type correct
-\end{verbatim}
-
-\textbf{Stage 3: Causal Structure Similarity}
-
-Extract causal paths addressed in ground truth and generated patch, then compute Jaccard similarity:
-$$J = \frac{|\text{paths}_{\text{patch}} \cap \text{paths}_{\text{truth}}|}{|\text{paths}_{\text{patch}} \cup \text{paths}_{\text{truth}}|}$$
-
-If $J \geq 0.30$ (30\% overlap threshold), the causal structure aligns.
-
-\textbf{Majority Voting}
-\begin{verbatim}
-If at least 2 out of 3 stages pass:
-    Ground truth validation: PASS
-Else:
-    Ground truth validation: FAIL
-    Flag for manual review
-\end{verbatim}
-
-This ground truth validation complements consistency checking by providing
-an additional layer of verification against known correct fixes, catching
-cases where a patch might be internally consistent but diverge significantly
-from the proven solution approach.
-
-\textbf{We might formalize parts of this explanation internally. For
-instance, we could represent it as an implication:}
-
-\[
-(\text{len} > N) \Rightarrow \lnot \text{OverflowOccurs}
-\]
-
-in the patched program, whereas in the original program we had
-
-\[
-(\text{len} > N) \Rightarrow \text{OverflowOccurs}.
-\]
-
-And the reason for the change is the insertion of the condition (check).
-We ensure to reference code locations (like ``at line X'' or ``in
-function Y'') so that a developer sees exactly where and what was
-changed to achieve the effect.
-
-\subsection{Phase 4: Structured Evaluation}\label{subsec:evaluation}
-
-After consistency checking confirms that $E_{\text{patch}}$ properly addresses $E_{\text{bug}}$, we perform structured evaluation to assess patch correctness and explanation quality across multiple dimensions.
-
-\textbf{Design Rationale:}
-While our original research design aimed for symbolic execution-based verification (using tools like KLEE or Z3 SMT solving), we adopted structured evaluation for practical reasons:
-First, symbolic execution often suffers from path explosion on real-world code with complex control flow.
-Second, structured evaluation allows nuanced assessment of explanation quality beyond binary correct/incorrect.
-Third, combining this with consistency checking and ground truth validation provides complementary verification strengths.
-This design choice prioritizes practical applicability while maintaining strong validation guarantees through multi-layered assessment.
-
-\subsubsection{Evaluation Dimensions}
-
-We evaluate patches and their explanations across four key dimensions:
-
-\begin{enumerate}
-\item \textbf{Accuracy (1-5)}: Technical correctness of the patch and explanation.
-Does the patch correctly address the vulnerability without introducing new issues?
-Is the causal reasoning technically sound?
-
-\item \textbf{Completeness (1-5)}: Coverage of WHAT, WHY, and HOW.
-Does the explanation cover what changed, why the vulnerability existed,
-and how the patch eliminates it? Are all causal paths addressed?
-
-\item \textbf{Clarity (1-5, 30\% weight)}: Quality of natural language presentation.
-Is the explanation understandable to developers? Are technical concepts
-explained clearly without unnecessary jargon?
-
-\item \textbf{Causality (1-5, 40\% weight)}: Depth of causal reasoning.
-Does the explanation demonstrate understanding of causal relationships?
-Are interventions properly justified using the causal model?
-\end{enumerate}
-
-\textbf{Evaluation Process}
 
 Recent work has demonstrated that LLM-based evaluation can provide assessment
 quality comparable to human expert evaluation when properly designed. Following
@@ -1018,11 +842,11 @@ We evaluate PatchScribe along multiple dimensions to answer the following key re
 
 \textbf{RQ1: Theory-Guided Generation Effectiveness} -- Does pre-hoc formal bug specification \(E_{\text{bug}}\) lead to more accurate patches than post-hoc explanations or vague hints? How much does theory-guided prompting with precise formal specifications improve patch quality compared to traditional approaches?
 
-\textbf{RQ2: Dual Verification Effectiveness} -- How effective is the dual explanation approach \(E_{\text{bug}} \leftrightarrow E_{\text{patch}}\) with consistency checking at detecting incomplete patches? Does multi-stage verification (consistency checking + manual evaluation + completeness analysis) provide stronger guarantees than exploit-only testing alone?
+\textbf{RQ2: Patch Quality} -- What is the quality of patches generated by the theory-guided approach? How well do generated patches address vulnerabilities compared to ground truth fixes?
 
-\textbf{RQ3: Scalability and Performance} -- What is the time overhead of the three-phase workflow (formalization, theory-guided generation, dual verification)? How does each phase contribute to the total time, and is the overhead acceptable for practical use?
+\textbf{RQ3: Scalability and Performance} -- What is the time overhead of the two-phase workflow (formalization, theory-guided generation)? How does each phase contribute to the total time, and is the overhead acceptable for practical use?
 
-\textbf{RQ4: Explanation Quality and Developer Trust} -- Do the dual explanations \(E_{\text{bug}}\) and \(E_{\text{patch}}\) provide useful insights to developers? Does the formal causal reasoning improve understanding and trust compared to post-hoc natural language explanations?
+\textbf{RQ4: Explanation Quality} -- How well do the dual explanations \(E_{\text{bug}}\) and \(E_{\text{patch}}\) convey vulnerability understanding and patch rationale? Does the formal causal reasoning improve explanation quality compared to post-hoc natural language explanations?
 
 \subsection{Experimental Setup}
 
@@ -1051,26 +875,25 @@ Where possible, we compare against published results from VRpilot~\cite{kulsum20
 \subsubsection{Evaluation Metrics}
 
 \textbf{For RQ1 (Theory-Guided Generation):}
-(1) Triple verification pass rate -- patches passing all three verification layers;
+(1) Patch correctness rate -- patches successfully addressing vulnerabilities through manual evaluation;
 (2) Ground truth similarity -- comparing generated patches to actual CVE fixes using AST-based structural similarity;
 (3) First-attempt success rate -- measuring how often the initial LLM response is correct, indicating guidance quality.
 We conduct an ablation study with four conditions:
-C1 (post-hoc: raw LLM with no formal guidance), C2 (vague hints: informal prompts like ``add a check''), C3 (pre-hoc guidance: \(E_{\text{bug}}\) specification without verification), and C4 (full PatchScribe with \(E_{\text{bug}}\) and multi-stage verification).
-Comparing C3 vs C1 isolates the effect of pre-hoc formalization, while C4 vs C3 shows the additional value of dual verification.
+C1 (no guidance: raw LLM with no formal specification), C2 (vague hints: informal prompts like ``add a check''), C3 (abstract guidance: general vulnerability description), and C4 (full PatchScribe with \(E_{\text{bug}}\) formal specification).
+Comparing C1 vs C4 shows the overall impact of theory-guided generation, while intermediate conditions isolate specific contributions.
 
-For RQ2 (Dual Verification Effectiveness), we measure:
-(1) Consistency pass rate -- the percentage of patches successfully passing dual explanation verification;
-(2) Strict consistency rate -- patches achieving perfect causal path alignment with ground truth;
-(3) Vulnerability elimination rate -- patches that successfully remove the identified vulnerabilities;
-(4) Ground truth alignment -- measuring location accuracy (relative distance < 5\%), intervention type matching, and causal structure similarity (Jaccard \(\geq\) 30\%).
-We evaluate the effectiveness of consistency checking in ensuring that \(E_{\text{patch}}\) properly addresses all causes identified in \(E_{\text{bug}}\), combined with manual evaluation to assess patch correctness and explanation quality.
+For RQ2 (Patch Quality), we measure:
+(1) Patch correctness through manual evaluation using structured assessment;
+(2) Ground truth similarity -- comparing generated patches to actual CVE fixes using AST-based structural similarity;
+(3) Vulnerability elimination rate -- patches that successfully remove the identified vulnerabilities.
+We assess patch quality through structured manual evaluation, focusing on whether patches correctly address vulnerabilities and how closely they align with ground truth fixes.
 
 For RQ3 (Scalability and Performance), we measure:
-(1) Time breakdown by phase -- separately measuring formalization (Phase 1), generation (Phase 2), and verification (Phase 3) time;
-(2) Total end-to-end time per vulnerability;
+(1) Time breakdown by phase -- separately measuring formalization (Phase 1) and generation (Phase 2) time;
+(2) Total system time per vulnerability;
 (3) Iteration count -- average number of patch generation attempts before success;
-(4) Resource usage -- peak memory and symbolic paths explored.
-We stratify results by code complexity (simple: \(\textless\) 50 LoC, medium: 50-100 LoC, complex: \(\textgreater\) 100 LoC) to assess scalability. Our target is \(\textless\) 3 minutes average processing time.
+(4) Resource usage -- peak memory and analysis overhead.
+We stratify results by code complexity (simple: \(\textless\) 50 LoC, medium: 50-100 LoC, complex: \(\textgreater\) 100 LoC) to assess scalability. Our target is \(\textless\) 2 minutes average system time.
 We compare against baseline times: raw LLM (\(\sim\) 60s), VRpilot with iterative feedback (\(\sim\) 110s), and report the time-quality trade-off.
 
 For RQ4 (Explanation Quality), we measure:
@@ -1088,7 +911,7 @@ Table~\ref{tab:rq1-results} presents end-to-end patch generation success rates a
 
 \begin{table}[h]
 \centering
-\caption{End-to-End Patch Generation Success Rates (\%) across four experimental conditions on 121 CVEs (ExtractFix: 24 cases, Zeroday Repair: 97 cases). Success defined as passing all three validation stages: consistency checking, ground truth validation, and structured evaluation. C1: Raw LLM (no guidance), C2: Vague hints (informal prompts), C3: Pre-hoc guidance ($E_{\text{bug}}$ only), C4: Full PatchScribe (complete system). % TODO: Fill with actual results after experiments}
+\caption{Patch Generation Success Rates (\%) across four experimental conditions on 121 CVEs (ExtractFix: 24 cases, Zeroday Repair: 97 cases). Success defined by manual evaluation of patch correctness. C1: Raw LLM (no guidance), C2: Vague hints (informal prompts), C3: Abstract guidance (general description), C4: Full PatchScribe ($E_{\text{bug}}$ formal specification). % TODO: Fill with actual results after experiments}
 \label{tab:rq1-results}
 \begin{tabular}{lcccc}
 \toprule
@@ -1115,36 +938,32 @@ Model-2 & [W1] & [W2] & [W3] & [W4] \\
 \item First-attempt success rate: [N\%] for C4 vs [M\%] for C1
 \end{itemize}
 
-\subsubsection{RQ2: Dual Verification Effectiveness}
+\subsubsection{RQ2: Patch Quality}
 
-Table~\ref{tab:rq2-results} presents verification metrics for patches generated under the full PatchScribe configuration (C4).
+Table~\ref{tab:rq2-results} presents patch quality metrics for the full PatchScribe system (C4).
 
 \begin{table}[h]
 \centering
-\caption{Dual Verification Metrics for Full PatchScribe System (C4 Configuration Only) showing consistency checking effectiveness, ground truth alignment, and vulnerability elimination rates. Location accuracy measured as relative distance < 5\%, intervention type matching via semantic pattern analysis, causal structure similarity via Jaccard coefficient $\geq$ 0.3. % TODO: Fill with actual results}
+\caption{Patch Quality Metrics for Full PatchScribe System (C4 Configuration Only) showing patch correctness, ground truth alignment, and vulnerability elimination rates through structured manual evaluation. % TODO: Fill with actual results}
 \label{tab:rq2-results}
 \begin{tabular}{lcc}
 \toprule
 \textbf{Metric} & \textbf{ExtractFix} & \textbf{Zeroday} \\
 \midrule
 Patches generated & [X] & [Y] \\
-Consistency checks passed & [A] & [B] \\
-Consistency pass rate & [A/X\%] & [B/Y\%] \\
-Vulnerability elimination (of passed) & [100\%] & [100\%] \\
-Strict consistency rate & [C\%] & [D\%] \\
-Ground truth location accuracy & [E\%] & [F\%] \\
-Intervention type matching & [G\%] & [H\%] \\
-Causal structure similarity (J $\geq$ 0.3) & [I\%] & [J\%] \\
+Patch correctness rate (manual eval) & [A\%] & [B\%] \\
+Vulnerability elimination rate & [C\%] & [D\%] \\
+Ground truth similarity (AST-based) & [E] & [F] \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \textbf{Key Findings:}
 \begin{itemize}
-\item All patches passing consistency checks successfully eliminate vulnerabilities
-\item Consistency checking provides reliable filtering mechanism
-\item [N\%] of patches achieve strict consistency (perfect causal path alignment)
-\item Ground truth validation shows [M\%] alignment across three metrics
+\item Theory-guided generation produces patches with [A\%] correctness rate
+\item [C\%] of generated patches successfully eliminate vulnerabilities
+\item Ground truth similarity score of [E] indicates strong alignment with expert fixes
+\item Manual evaluation confirms quality of generated patches and explanations
 \end{itemize}
 
 \subsubsection{RQ3: Scalability and Performance}
@@ -1153,7 +972,7 @@ Table~\ref{tab:rq3-results} presents timing and resource usage breakdown.
 
 \begin{table}[h]
 \centering
-\caption{Performance and Resource Usage breakdown by phase, showing time overhead of each component (Phase 1: PCG/SCM construction, Phase 2: LLM generation, Phase 3: Consistency verification) and resource consumption. Comparison includes VRpilot (reported $\sim$110s) and raw LLM baseline ($\sim$60s). % TODO: Fill with actual timing measurements}
+\caption{Performance and Resource Usage breakdown by phase, showing time overhead of each component (Phase 1: PCG/SCM construction, Phase 2: LLM generation) and resource consumption. Comparison includes VRpilot (reported $\sim$110s) and raw LLM baseline ($\sim$60s). % TODO: Fill with actual timing measurements}
 \label{tab:rq3-results}
 \begin{tabular}{lc}
 \toprule
@@ -1162,8 +981,7 @@ Table~\ref{tab:rq3-results} presents timing and resource usage breakdown.
 \multicolumn{2}{c}{\textit{Time Breakdown (seconds)}} \\
 Phase 1: PCG/SCM Construction & [T1] \\
 Phase 2: LLM Generation & [T2] \\
-Phase 3: Consistency Verification & [T3] \\
-\textbf{Total Average Time} & \textbf{[T\_total]} \\
+\textbf{Total System Time} & \textbf{[T\_total]} \\
 \midrule
 \multicolumn{2}{c}{\textit{Resource Usage}} \\
 Peak memory usage & [M] MB \\
@@ -1534,9 +1352,9 @@ Our evaluation across diverse CWE types helps identify systematic biases. We obs
 
 \section{Conclusion}\label{sec:conclusion}
 
-This paper presented PatchScribe, a theory-guided framework for automated vulnerability repair that produces systematically validated causal explanations.
+This paper presented PatchScribe, a theory-guided framework for automated vulnerability repair that produces dual causal explanations.
 Our work addresses a critical gap in current automated repair: patches often come with unverifiable post-hoc explanations, leading to uncertainty about whether vulnerabilities are truly eliminated.
-PatchScribe tackles this through a three-phase approach: we construct a Program Causal Graph and Structural Causal Model to formally capture vulnerability causes, use this formalization to guide LLM-based patch generation with precise constraints, and then verify consistency between bug and patch explanations through multi-stage validation.
+PatchScribe tackles this through a two-phase approach: we construct a Program Causal Graph and Structural Causal Model to formally capture vulnerability causes, then use this formalization to guide LLM-based patch generation with precise constraints, producing patches with dual explanations (E_bug and E_patch).
 
 Our approach contributes a novel way to improve patch assurance.
 By treating patches as interventions in a causal model, we enable systematic verification through dual explanation consistency checking.

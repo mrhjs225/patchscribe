@@ -110,21 +110,21 @@ class SpecificationBuilder:
         Strengthened to better differentiate from C1 by providing
         concrete vulnerability scenarios and mitigation hints.
         """
-        content_parts = ["## 보안 요구사항\n"]
+        content_parts = ["## Security Requirements\n"]
 
-        content_parts.append(f"**취약점 유형**: {cwe}")
+        content_parts.append(f"**Vulnerability Type**: {cwe}")
         if cwe_description:
-            content_parts.append(f"  - 설명: {cwe_description}")
+            content_parts.append(f"  - Description: {cwe_description}")
 
-        content_parts.append(f"\n**필요한 보호**: {safety_property}")
+        content_parts.append(f"\n**Required Protection**: {safety_property}")
 
         # Enhanced natural language guidance
         if natural_context:
-            content_parts.append(f"\n## 취약점 발생 시나리오\n{natural_context}")
-            content_parts.append(f"\n**수정 방향**: 위 시나리오를 차단하는 검증 또는 가드를 추가하세요.")
+            content_parts.append(f"\n## Vulnerability Scenario\n{natural_context}")
+            content_parts.append(f"\n**Fix Direction**: Add validation or guards that block the above scenario.")
         else:
             # Fallback: Provide generic but helpful guidance
-            content_parts.append(f"\n**수정 방향**: {safety_property}를 보장하는 검증 메커니즘을 추가하세요.")
+            content_parts.append(f"\n**Fix Direction**: Add validation mechanisms that ensure {safety_property}.")
 
         content = "\n".join(content_parts)
 
@@ -160,19 +160,19 @@ class SpecificationBuilder:
         not as a strict requirement. This gives the model flexibility in
         implementation while still providing helpful context.
         """
-        content_parts = ["## 보안 요구사항\n"]
+        content_parts = ["## Security Requirements\n"]
 
-        content_parts.append(f"**취약점 유형**: {cwe}")
+        content_parts.append(f"**Vulnerability Type**: {cwe}")
         if cwe_description:
-            content_parts.append(f"  - 설명: {cwe_description}")
+            content_parts.append(f"  - Description: {cwe_description}")
 
-        content_parts.append(f"\n**필요한 보호**: {safety_property}")
+        content_parts.append(f"\n**Required Protection**: {safety_property}")
 
         # Add actionable instructions (with abstract guidelines)
         if intervention_spec and intervention_spec.interventions:
-            content_parts.append("\n## 수정 지시사항\n")
-            content_parts.append("다음 보안 목표를 달성하도록 코드를 수정하세요:\n")
-            content_parts.append("(위치 정보는 참고용이며, 가장 적절한 구현 방법을 선택하세요)\n")
+            content_parts.append("\n## Fix Instructions\n")
+            content_parts.append("Modify the code to achieve the following security goals:\n")
+            content_parts.append("(Location information is for reference only; choose the most appropriate implementation method)\n")
 
             instructions = []
             for intervention in intervention_spec.interventions:
@@ -189,16 +189,16 @@ class SpecificationBuilder:
             summary = self.action_generator.generate_intervention_summary(
                 intervention_spec.interventions
             )
-            content_parts.append(f"\n**요약**: {summary}")
+            content_parts.append(f"\n**Summary**: {summary}")
 
             # Add implementation note
-            content_parts.append("\n**구현 참고사항**:")
-            content_parts.append("• 위치는 가이드라인이며, 코드 구조에 맞게 최적의 위치를 선택하세요")
-            content_parts.append("• 여러 구현 방법이 가능한 경우, 가장 안전하고 간단한 방법을 선택하세요")
+            content_parts.append("\n**Implementation Notes**:")
+            content_parts.append("• Locations are guidelines; select the optimal position based on code structure")
+            content_parts.append("• When multiple implementation methods are possible, choose the safest and simplest approach")
 
         # Optional natural context
         if natural_context:
-            content_parts.append(f"\n## 참고 정보\n{natural_context}")
+            content_parts.append(f"\n## Additional Context\n{natural_context}")
 
         content = "\n".join(content_parts)
 
@@ -238,8 +238,8 @@ class SpecificationBuilder:
 
         # === SECTION 1: Causal Analysis (TOP PRIORITY) ===
         if ebug and ebug.causal_paths:
-            content_parts.append("# 1. 취약점 인과 분석\n")
-            content_parts.append("다음 인과 경로를 통해 취약점이 발현됩니다:\n")
+            content_parts.append("# 1. Vulnerability Causal Analysis\n")
+            content_parts.append("The vulnerability manifests through the following causal paths:\n")
 
             for path in ebug.causal_paths:
                 path_explanation = self.action_generator.translate_causal_path(path)
@@ -248,10 +248,10 @@ class SpecificationBuilder:
 
         # === SECTION 2: Intervention Point Analysis ===
         if intervention_spec and intervention_spec.interventions:
-            content_parts.append("# 2. 개입 지점 및 근거\n")
-            content_parts.append("**왜 이 지점에서 수정하는가:**\n")
-            content_parts.append("- 위 인과 경로의 핵심 단계를 차단하기 위함")
-            content_parts.append("- 최소 개입 원칙: 가장 효과적이고 부작용이 적은 위치 선택\n")
+            content_parts.append("# 2. Intervention Points and Rationale\n")
+            content_parts.append("**Why fix at these points:**\n")
+            content_parts.append("- To block key steps in the causal paths above")
+            content_parts.append("- Minimal intervention principle: select the most effective position with minimal side effects\n")
 
             intervention_analysis = self.action_generator.generate_intervention_analysis(
                 intervention_spec.interventions
@@ -260,43 +260,43 @@ class SpecificationBuilder:
 
         # === SECTION 3: Implementation Guide (Single Unified Format) ===
         if intervention_spec and intervention_spec.interventions:
-            content_parts.append("# 3. 패치 구현 방법\n")
-            content_parts.append("각 개입을 다음과 같이 구현하세요:\n")
+            content_parts.append("# 3. Patch Implementation Method\n")
+            content_parts.append("Implement each intervention as follows:\n")
 
             instructions = []
             for i, intervention in enumerate(intervention_spec.interventions, 1):
                 action = self.action_generator.translate_intervention(intervention)
 
                 # Unified format with causal connection
-                instruction_parts = [f"\n### 개입 {i}"]
-                instruction_parts.append(f"**수행할 작업**: {action.description}")
-                instruction_parts.append(f"**이유**: {action.rationale}")
-                instruction_parts.append(f"**인과 차단**: 섹션 1의 인과 경로 중 해당 단계를 차단")
+                instruction_parts = [f"\n### Intervention {i}"]
+                instruction_parts.append(f"**Action**: {action.description}")
+                instruction_parts.append(f"**Reason**: {action.rationale}")
+                instruction_parts.append(f"**Causal Blocking**: Blocks the corresponding step in Section 1's causal path")
                 if action.code_hint:
-                    instruction_parts.append(f"**코드 힌트**: `{action.code_hint}`")
+                    instruction_parts.append(f"**Code Hint**: `{action.code_hint}`")
 
                 instructions.append("\n".join(instruction_parts))
 
             content_parts.append("\n".join(instructions))
 
         # === SECTION 4: Security Requirements (moved after implementation) ===
-        content_parts.append("\n# 4. 보안 요구사항\n")
-        content_parts.append(f"**취약점 유형**: {cwe}")
+        content_parts.append("\n# 4. Security Requirements\n")
+        content_parts.append(f"**Vulnerability Type**: {cwe}")
         if cwe_description:
-            content_parts.append(f"  - 설명: {cwe_description}")
-        content_parts.append(f"\n**필요한 보호**: {safety_property}")
+            content_parts.append(f"  - Description: {cwe_description}")
+        content_parts.append(f"\n**Required Protection**: {safety_property}")
 
         # === SECTION 5: Consistency Requirements ===
-        content_parts.append("\n# 5. 일관성 검증\n")
-        content_parts.append("패치 작성 후 다음을 확인하세요:\n")
-        content_parts.append("✓ **섹션 1의 인과 경로가 차단**되었는가?")
-        content_parts.append("✓ **섹션 2의 개입 지점** 중 하나 이상이 구현되었는가?")
-        content_parts.append("✓ **최소 개입 원칙**을 따랐는가? (불필요한 변경 최소화)")
-        content_parts.append("✓ 기존 기능에 **부작용이 없는가**?")
+        content_parts.append("\n# 5. Consistency Verification\n")
+        content_parts.append("After writing the patch, verify the following:\n")
+        content_parts.append("✓ Are **Section 1's causal paths blocked**?")
+        content_parts.append("✓ Is at least one of **Section 2's intervention points** implemented?")
+        content_parts.append("✓ Does it follow the **minimal intervention principle**? (minimize unnecessary changes)")
+        content_parts.append("✓ Are there **no side effects** on existing functionality?")
 
         # Optional natural context
         if natural_context:
-            content_parts.append(f"\n## 추가 참고 정보\n{natural_context}")
+            content_parts.append(f"\n## Additional Reference Information\n{natural_context}")
 
         content = "\n".join(content_parts)
 
@@ -319,10 +319,10 @@ class SpecificationBuilder:
         parts = [f"• **{action.description}**"]
 
         if include_rationale and action.rationale:
-            parts.append(f"  - 이유: {action.rationale}")
+            parts.append(f"  - Rationale: {action.rationale}")
 
         if action.code_hint:
-            parts.append(f"  - 코드 힌트: `{action.code_hint}`")
+            parts.append(f"  - Code Hint: `{action.code_hint}`")
 
         return "\n".join(parts)
 
@@ -352,7 +352,7 @@ def build_specification_for_condition(
     # Extract CWE information
     cwe = vuln_case.get("cwe", "CWE-Unknown")
     cwe_name = vuln_case.get("cwe_name", "")
-    cwe_description = f"{cwe_name}" if cwe_name else "보안 취약점"
+    cwe_description = f"{cwe_name}" if cwe_name else "Security Vulnerability"
 
     # Safety property (can be inferred from CWE or provided)
     safety_property = _infer_safety_property(cwe, cwe_name)
@@ -372,17 +372,17 @@ def _infer_safety_property(cwe: str, cwe_name: str) -> str:
     """Infer safety property from CWE"""
     # Common CWE mappings
     safety_properties = {
-        "CWE-787": "모든 버퍼 쓰기는 할당된 경계 내에서 이루어져야 합니다",
-        "CWE-125": "모든 버퍼 읽기는 할당된 경계 내에서 이루어져야 합니다",
-        "CWE-476": "모든 포인터는 역참조 전에 NULL이 아님을 확인해야 합니다",
-        "CWE-416": "메모리는 해제 후 접근되어서는 안 됩니다",
-        "CWE-415": "메모리는 한 번만 해제되어야 합니다",
-        "CWE-190": "정수 연산은 오버플로우를 방지해야 합니다",
-        "CWE-191": "정수 연산은 언더플로우를 방지해야 합니다",
-        "CWE-119": "버퍼 경계는 항상 존중되어야 합니다",
-        "CWE-20": "모든 외부 입력은 검증되어야 합니다",
-        "CWE-79": "출력은 XSS 공격을 방지하도록 이스케이프되어야 합니다",
-        "CWE-89": "SQL 쿼리는 인젝션 공격을 방지해야 합니다",
+        "CWE-787": "All buffer writes must occur within allocated bounds",
+        "CWE-125": "All buffer reads must occur within allocated bounds",
+        "CWE-476": "All pointers must be verified as non-NULL before dereferencing",
+        "CWE-416": "Memory must not be accessed after being freed",
+        "CWE-415": "Memory must be freed only once",
+        "CWE-190": "Integer operations must prevent overflow",
+        "CWE-191": "Integer operations must prevent underflow",
+        "CWE-119": "Buffer boundaries must always be respected",
+        "CWE-20": "All external inputs must be validated",
+        "CWE-79": "Output must be escaped to prevent XSS attacks",
+        "CWE-89": "SQL queries must prevent injection attacks",
     }
 
     # Try exact match
@@ -392,13 +392,13 @@ def _infer_safety_property(cwe: str, cwe_name: str) -> str:
     # Try partial matching by CWE name
     name_lower = cwe_name.lower()
     if "buffer" in name_lower and "overflow" in name_lower:
-        return "버퍼 경계는 항상 존중되어야 합니다"
+        return "Buffer boundaries must always be respected"
     elif "null" in name_lower:
-        return "포인터는 역참조 전에 NULL 검사가 필요합니다"
+        return "Pointers require NULL checks before dereferencing"
     elif "overflow" in name_lower:
-        return "산술 연산은 오버플로우를 방지해야 합니다"
+        return "Arithmetic operations must prevent overflow"
     elif "use after" in name_lower:
-        return "메모리는 해제 후 접근되어서는 안 됩니다"
+        return "Memory must not be accessed after being freed"
 
     # Default
-    return "코드는 안전한 실행을 보장해야 합니다"
+    return "Code must ensure safe execution"

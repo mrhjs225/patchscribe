@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from .llm import LLMClient, LLMConfig, LLMUnavailable
 
@@ -17,30 +17,54 @@ class PatchSuccessVerdict:
     plausible: bool
     reason: str = ""
     raw_response: Optional[str] = None
+    judge_votes: Optional[Dict[str, Dict[str, bool]]] = None
+    voting_method: Optional[str] = None
 
     @property
     def is_success(self) -> bool:
         return self.syntactic_equivalent or self.semantic_equivalent or self.plausible
 
     def as_dict(self) -> Dict[str, object]:
-        return {
+        result = {
             "syn_eq": self.syntactic_equivalent,
             "sem_eq": self.semantic_equivalent,
             "plausible": self.plausible,
             "reason": self.reason,
             "raw": self.raw_response,
         }
+        if self.judge_votes is not None:
+            result["judge_votes"] = self.judge_votes
+        if self.voting_method is not None:
+            result["voting_method"] = self.voting_method
+        return result
 
 
 class PatchSuccessJudge:
     """
     Determines whether a generated patch satisfies SynEq, SemEq, or Plausible criteria.
     Falls back to deterministic checks before consulting the LLM judge.
+    Supports majority voting with multiple judges.
     """
 
-    def __init__(self) -> None:
-        judge_config = LLMConfig.from_env(for_judge=True)
-        self.llm = LLMClient(judge_config)
+    def __init__(self, *, use_majority_voting: bool = False, judge_models: List[str] = None) -> None:
+        """
+        Args:
+            use_majority_voting: If True, use 3 judges with majority voting
+            judge_models: List of judge models to use (default: ["gpt", "claude", "gemini"])
+        """
+        self.use_majority_voting = use_majority_voting
+        if use_majority_voting:
+            self.judge_models = judge_models or ["gpt", "claude", "gemini"]
+            if len(self.judge_models) != 3:
+                raise ValueError("Majority voting requires exactly 3 judges")
+        else:
+            self.judge_models = ["gpt"]  # Single judge (backward compatibility)
+
+        # Create LLM clients for each judge
+        self.judges = {}
+        for judge_key in self.judge_models:
+            judge_config = LLMConfig.from_env(for_judge=True, judge_model=judge_key)
+            self.judges[judge_key] = LLMClient(judge_config)
 
     def evaluate(
         self,
@@ -64,8 +88,9 @@ class PatchSuccessJudge:
                 reason="Patched code exactly matches provided ground truth.",
             )
 
-        if not self.llm.available():
-            return PatchSuccessVerdict(False, False, False, reason="LLM judge unavailable.")
+        # Check if all judges are available
+        if not all(client.available() for client in self.judges.values()):
+            return PatchSuccessVerdict(False, False, False, reason="One or more judges unavailable.")
 
         prompt = self._build_prompt(
             original_code=original_code,
@@ -74,36 +99,71 @@ class PatchSuccessJudge:
             vulnerability_signature=vulnerability_signature,
             description=description,
         )
-        try:
-            response = self.llm._post_chat(
-                [
-                    {"role": "system", "content": self._system_prompt()},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.0,
-            )
-        except LLMUnavailable as exc:
-            return PatchSuccessVerdict(False, False, False, reason=f"LLM unavailable: {exc}")
 
-        payload = self._parse_json_response(response)
-        if payload is None:
-            return PatchSuccessVerdict(
-                False,
-                False,
-                False,
-                reason="LLM judge returned non-JSON payload.",
-                raw_response=response,
-            )
+        # Collect votes from all judges in parallel
+        all_votes = {}
+        all_responses = {}
 
-        sem_eq = _as_bool(payload.get("semantic_equivalent") or payload.get("sem_eq"))
-        plausible = _as_bool(payload.get("plausible"))
-        reason = payload.get("reason") or payload.get("analysis") or payload.get("notes") or ""
+        # Parallelize judge calls using ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def call_judge(judge_key: str, judge_client):
+            try:
+                response = judge_client._post_chat(
+                    [
+                        {"role": "system", "content": self._system_prompt()},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.0,
+                )
+                payload = self._parse_json_response(response)
+
+                if payload is None:
+                    return judge_key, {"sem_eq": False, "plausible": False, "reason": "Non-JSON response"}, response
+
+                sem_eq = _as_bool(payload.get("semantic_equivalent") or payload.get("sem_eq"))
+                plausible = _as_bool(payload.get("plausible"))
+                reason = payload.get("reason") or payload.get("analysis") or payload.get("notes") or ""
+
+                vote = {
+                    "sem_eq": sem_eq,
+                    "plausible": plausible,
+                    "reason": reason.strip()
+                }
+                return judge_key, vote, response
+
+            except LLMUnavailable as exc:
+                return judge_key, {"sem_eq": False, "plausible": False, "reason": f"Judge unavailable: {exc}"}, None
+
+        # Execute judge calls in parallel
+        with ThreadPoolExecutor(max_workers=len(self.judges)) as executor:
+            futures = {executor.submit(call_judge, key, client): key for key, client in self.judges.items()}
+
+            for future in as_completed(futures):
+                judge_key, vote, response = future.result()
+                all_votes[judge_key] = vote
+                all_responses[judge_key] = response
+
+        # Apply voting logic
+        if self.use_majority_voting:
+            final_sem_eq, final_plausible, final_reason = self._apply_majority_vote(all_votes)
+            voting_method = "majority"
+        else:
+            # Single judge (backward compatibility)
+            single_vote = all_votes[self.judge_models[0]]
+            final_sem_eq = single_vote.get("sem_eq", False)
+            final_plausible = single_vote.get("plausible", False)
+            final_reason = single_vote.get("reason", "")
+            voting_method = "single"
+
         return PatchSuccessVerdict(
             syntactic_equivalent=False,
-            semantic_equivalent=sem_eq,
-            plausible=plausible,
-            reason=reason.strip(),
-            raw_response=response,
+            semantic_equivalent=final_sem_eq,
+            plausible=final_plausible,
+            reason=final_reason,
+            raw_response=json.dumps(all_responses),
+            judge_votes=all_votes,
+            voting_method=voting_method,
         )
 
     @staticmethod
@@ -186,6 +246,49 @@ class PatchSuccessJudge:
             "Use the provided definitions to decide if a generated patch is SemEq or Plausible. "
             "Respond strictly with JSON: {\"semantic_equivalent\": bool, \"plausible\": bool, \"reason\": \"...\"}."
         )
+
+    @staticmethod
+    def _apply_majority_vote(votes: Dict[str, Dict[str, bool]]) -> tuple[bool, bool, str]:
+        """
+        Apply majority voting (2 out of 3 must agree).
+
+        Returns:
+            (sem_eq, plausible, reason)
+        """
+        sem_eq_votes = [v.get("sem_eq", False) for v in votes.values()]
+        plausible_votes = [v.get("plausible", False) for v in votes.values()]
+
+        # Count True votes
+        sem_eq_count = sum(sem_eq_votes)
+        plausible_count = sum(plausible_votes)
+
+        # Majority = at least 2 out of 3
+        final_sem_eq = sem_eq_count >= 2
+        final_plausible = plausible_count >= 2
+
+        # Build reason explaining the vote
+        judge_names = list(votes.keys())
+        reason_parts = []
+
+        reason_parts.append(f"SemEq votes: {sem_eq_count}/3 (majority: {final_sem_eq})")
+        for judge, vote in votes.items():
+            if vote.get("sem_eq"):
+                reason_parts.append(f"  - {judge}: SemEq=True")
+
+        reason_parts.append(f"Plausible votes: {plausible_count}/3 (majority: {final_plausible})")
+        for judge, vote in votes.items():
+            if vote.get("plausible"):
+                reason_parts.append(f"  - {judge}: Plausible=True")
+
+        # Add individual judge reasons
+        reason_parts.append("\nIndividual judge reasons:")
+        for judge, vote in votes.items():
+            judge_reason = vote.get("reason", "No reason provided")
+            reason_parts.append(f"  [{judge}] {judge_reason}")
+
+        final_reason = "\n".join(reason_parts)
+
+        return final_sem_eq, final_plausible, final_reason
 
 
 def _normalize_code(code: Optional[str]) -> str:
