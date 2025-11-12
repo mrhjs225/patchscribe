@@ -20,7 +20,7 @@ from patchscribe.verification import Verifier  # noqa: E402
 
 
 def format_status(stage: str, info: dict) -> str:
-    icon = "✅" if info.get("available") else "⚠️"
+    icon = "[OK]" if info.get("available") else "[WARN]"
     reason = info.get("reason", "")
     tools = ", ".join(info.get("tools") or []) or "N/A"
     if info.get("available"):

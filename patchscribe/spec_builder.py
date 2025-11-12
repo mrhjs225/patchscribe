@@ -308,10 +308,10 @@ class SpecificationBuilder:
         # === SECTION 5: Consistency Requirements ===
         content_parts.append("\n# 5. Consistency Verification\n")
         content_parts.append("After writing the patch, verify the following:\n")
-        content_parts.append("✓ Are **Section 1's causal paths blocked**?")
-        content_parts.append("✓ Is at least one of **Section 2's intervention points** implemented?")
-        content_parts.append("✓ Does it follow the **minimal intervention principle**? (minimize unnecessary changes)")
-        content_parts.append("✓ Are there **no side effects** on existing functionality?")
+        content_parts.append("- Are **Section 1's causal paths blocked**?")
+        content_parts.append("- Is at least one of **Section 2's intervention points** implemented?")
+        content_parts.append("- Does it follow the **minimal intervention principle**? (minimize unnecessary changes)")
+        content_parts.append("- Are there **no side effects** on existing functionality?")
         content_parts.append("\n**Note**: This is the complete PatchScribe specification (C4) with full causal analysis and detailed implementation guidance.")
 
         # Optional natural context

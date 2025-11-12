@@ -56,7 +56,7 @@ class ResultEvaluator:
         # Initialize success judge with gpt-5-mini only
         self.success_judge = PatchSuccessJudge()
 
-        print(f"✅ Initialized evaluator with judge: gpt-5-mini")
+        print(f"[OK] Initialized evaluator with judge: gpt-5-mini")
         print(f"   Voting method: single judge")
 
     def evaluate_file(
@@ -77,7 +77,7 @@ class ResultEvaluator:
             skip_explanation: Skip explanation quality evaluation
         """
         print(f"\n{'='*80}")
-        print(f"📂 Loading: {input_file}")
+        print(f"[DIR] Loading: {input_file}")
 
         # Load experiment results
         with open(input_file, 'r') as f:
@@ -85,23 +85,23 @@ class ResultEvaluator:
 
         cases = data.get('cases', [])
         if not cases:
-            print(f"  ⚠️  No cases found in {input_file}")
+            print(f"  [WARN]  No cases found in {input_file}")
             return
 
-        print(f"  📊 Found {len(cases)} cases")
+        print(f"  [ANALYZE] Found {len(cases)} cases")
 
         # Evaluate success judgments
         if not skip_success:
-            print(f"\n🔍 Evaluating success judgments...")
+            print(f"\n[SEARCH] Evaluating success judgments...")
             self._evaluate_success_batch(cases)
 
         # Evaluate explanation quality
         if not skip_explanation:
-            print(f"\n📝 Evaluating explanation quality...")
+            print(f"\n[EVAL] Evaluating explanation quality...")
             self._evaluate_explanations_batch(cases)
 
         # Recalculate metrics
-        print(f"\n📊 Recalculating metrics...")
+        print(f"\n[ANALYZE] Recalculating metrics...")
         data['metrics'] = self._compute_metrics(cases)
 
         # Add evaluation metadata
@@ -119,7 +119,7 @@ class ResultEvaluator:
         with open(output_file, 'w') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
-        print(f"\n✅ Saved evaluated results to: {output_file}")
+        print(f"\n[OK] Saved evaluated results to: {output_file}")
         print(f"   Success rate: {data['metrics'].get('success_rate', 0):.1%}")
         print(f"   Cases evaluated: {len(cases)}")
 
@@ -163,7 +163,7 @@ class ResultEvaluator:
 
         if not eval_tasks:
             if skipped_count > 0:
-                print(f"  ⏭️  Skipped: {skipped_count} cases (already evaluated)")
+                print(f"  [SKIP]  Skipped: {skipped_count} cases (already evaluated)")
             return
 
         # Evaluate in parallel using ThreadPoolExecutor
@@ -190,7 +190,7 @@ class ResultEvaluator:
                 idx, case, verdict, error = future.result()
 
                 if error:
-                    print(f"  ⚠️  Error evaluating case {idx}: {error}")
+                    print(f"  [WARN]  Error evaluating case {idx}: {error}")
                     continue
 
                 if verdict:
@@ -199,9 +199,9 @@ class ResultEvaluator:
                     case['actual_success'] = verdict.is_success
                     evaluated_count += 1
 
-        print(f"  ✅ Evaluated: {evaluated_count} cases")
+        print(f"  [OK] Evaluated: {evaluated_count} cases")
         if skipped_count > 0:
-            print(f"  ⏭️  Skipped: {skipped_count} cases (already evaluated)")
+            print(f"  [SKIP]  Skipped: {skipped_count} cases (already evaluated)")
 
     def _evaluate_explanations_batch(self, cases: List[Dict]) -> None:
         """Evaluate explanation quality for all cases."""
@@ -251,10 +251,10 @@ class ResultEvaluator:
             valid_indices.append(idx)
 
         if not prompts:
-            print(f"  ⚠️  No valid explanations to evaluate")
+            print(f"  [WARN]  No valid explanations to evaluate")
             return
 
-        print(f"  📝 Evaluating {len(prompts)} explanations with gpt-5-mini...")
+        print(f"  [EVAL] Evaluating {len(prompts)} explanations with gpt-5-mini...")
 
         # Single judge evaluation with gpt-5-mini
         scores = LLMClient.batch_score_explanations(prompts, max_workers=self.batch_size, judge_model='gpt')
@@ -302,10 +302,10 @@ class ResultEvaluator:
 
                 success_count += 1
             except (json.JSONDecodeError, ValueError, KeyError) as e:
-                print(f"  ⚠️  Failed to parse judge response for case {case.get('case_id', idx)}: {e}")
+                print(f"  [WARN]  Failed to parse judge response for case {case.get('case_id', idx)}: {e}")
                 continue
 
-        print(f"  ✅ Successfully evaluated {success_count}/{len(prompts)} explanations")
+        print(f"  [OK] Successfully evaluated {success_count}/{len(prompts)} explanations")
 
     @staticmethod
     def _find_latest_results(input_path: Path) -> List[Path]:
@@ -370,7 +370,7 @@ class ResultEvaluator:
 
             # Skip this model if no results found in any timestamp directory
             if not latest_dir:
-                print(f"  ⚠️  {model_dir.name}: no result files found in any timestamp directory")
+                print(f"  [WARN]  {model_dir.name}: no result files found in any timestamp directory")
                 continue
 
             # Collect all *_results.json files from the latest directory
@@ -378,7 +378,7 @@ class ResultEvaluator:
             result_files.extend(latest_results)
 
             if latest_results:
-                print(f"  📌 {model_dir.name}: using latest run {latest_dir.name} ({len(latest_results)} files)")
+                print(f"  [NOTE] {model_dir.name}: using latest run {latest_dir.name} ({len(latest_results)} files)")
 
         return result_files
 
@@ -467,20 +467,20 @@ Example usage:
     if input_path.is_file():
         # Single file specified
         input_files.append(input_path)
-        print(f"📋 Evaluating single file: {input_path.name}")
+        print(f"[LIST] Evaluating single file: {input_path.name}")
     elif input_path.is_dir():
         # Directory specified - find latest results for each model
-        print(f"🔍 Searching for latest results in: {input_path}")
+        print(f"[SEARCH] Searching for latest results in: {input_path}")
         input_files = ResultEvaluator._find_latest_results(input_path)
 
         if input_files:
-            print(f"📋 Found {len(input_files)} result files from latest runs")
+            print(f"[LIST] Found {len(input_files)} result files from latest runs")
     else:
-        print(f"❌ Input path not found: {input_path}")
+        print(f"[ERROR] Input path not found: {input_path}")
         sys.exit(1)
 
     if not input_files:
-        print(f"❌ No *_results.json files found in: {input_path}")
+        print(f"[ERROR] No *_results.json files found in: {input_path}")
         sys.exit(1)
 
     # Determine output directory
@@ -498,7 +498,7 @@ Example usage:
             # For directory: dirname_evaluated
             output_dir = input_path.parent / f"{input_path.name}_evaluated"
 
-    print(f"📂 Output directory: {output_dir}")
+    print(f"[DIR] Output directory: {output_dir}")
     print(f"   Input structure will be preserved under output directory")
 
     # Initialize evaluator (use only gpt-5-mini)
@@ -536,7 +536,7 @@ Example usage:
     # Use min of: number of files, concurrency setting, or reasonable max (e.g., 4)
     max_file_workers = min(len(input_files), 4)
 
-    print(f"⚡ Processing {len(input_files)} files with {max_file_workers} parallel workers")
+    print(f"[FAST] Processing {len(input_files)} files with {max_file_workers} parallel workers")
 
     # Process all files in parallel
     with ThreadPoolExecutor(max_workers=max_file_workers) as executor:
@@ -546,11 +546,11 @@ Example usage:
             input_file, error = future.result()
             if error:
                 exc, trace = error
-                print(f"❌ Error processing {input_file}: {exc}")
+                print(f"[ERROR] Error processing {input_file}: {exc}")
                 print(trace)
 
     print(f"\n{'='*80}")
-    print(f"✅ Evaluation complete! Results saved to: {output_dir}")
+    print(f"[OK] Evaluation complete! Results saved to: {output_dir}")
 
 
 if __name__ == '__main__':

@@ -887,18 +887,18 @@ Evaluate both explanations on the following dimensions (1-5 scale, where 5 is be
 
 **Criteria:**
 - **Trigger Conditions** (1.5 pts): Does it explain under what conditions (inputs, states) the vulnerability occurs?
-  - ✅ EXCELLENT: "when user input > buffer size (256 bytes)" or "when idev is NULL"
-  - ❌ WEAK: "when invalid input is provided"
+  - EXCELLENT: "when user input > buffer size (256 bytes)" or "when idev is NULL"
+  - WEAK: "when invalid input is provided"
   - Must be **specific and testable**
 - **Vulnerable Location** (2.0 pts): Does it precisely identify the vulnerable code location (function, line numbers)?
-  - ✅ EXCELLENT: "Line 9: idev->cnf.disable_ipv6 dereference without prior NULL check"
-  - ✅ GOOD: "idev dereference in addrconf_disable_ipv6()"
-  - ❌ WEAK: "the function has a vulnerability"
+  - EXCELLENT: "Line 9: idev->cnf.disable_ipv6 dereference without prior NULL check"
+  - GOOD: "idev dereference in addrconf_disable_ipv6()"
+  - WEAK: "the function has a vulnerability"
   - **Must include**: Function name, line number, or variable name
 - **Root Cause** (1.5 pts): Does it explain the underlying programming error?
-  - ✅ EXCELLENT: "Missing NULL check allows pointer dereference when lookup fails"
-  - ✅ GOOD: "No bounds check before strcpy"
-  - ❌ WEAK: "improper validation" or "insecure code"
+  - EXCELLENT: "Missing NULL check allows pointer dereference when lookup fails"
+  - GOOD: "No bounds check before strcpy"
+  - WEAK: "improper validation" or "insecure code"
   - **Post-hoc explanations** often use generic terms → lower score
 
 **Scoring:**
@@ -920,26 +920,26 @@ Evaluate both explanations on the following dimensions (1-5 scale, where 5 is be
 
 **Criteria:**
 - **Code Change Coverage** (2.0 pts): Does it describe **ALL** code changes made by the patch?
-  - ✅ EXCELLENT (2.0 pts): "Patch adds 3 changes: (1) Line 10: `if (!buf) return -ENOMEM;` (2) Line 15: `if (len >= sizeof(buf)) len = sizeof(buf)-1;` (3) Line 20: `buf[len] = '\0';`"
-  - ✅ GOOD (1.5 pts): "Patch adds NULL check at Line 10 and size validation at Line 15"
-  - ⚠️ PARTIAL (0.5-1.0 pts): "Patch adds a check" (which check? how many? where?)
-  - ❌ WEAK (0 pts): "The patch fixes the code"
+  - EXCELLENT (2.0 pts): "Patch adds 3 changes: (1) Line 10: `if (!buf) return -ENOMEM;` (2) Line 15: `if (len >= sizeof(buf)) len = sizeof(buf)-1;` (3) Line 20: `buf[len] = '\0';`"
+  - GOOD (1.5 pts): "Patch adds NULL check at Line 10 and size validation at Line 15"
+  - PARTIAL (0.5-1.0 pts): "Patch adds a check" (which check? how many? where?)
+  - WEAK (0 pts): "The patch fixes the code"
 
   **CRITICAL**: If the patch makes N changes but explanation only describes < N changes → score ≤ 1.5
 
   **MUST include**: Line numbers or locations + What was added/modified/deleted
 
 - **Mechanism** (2.0 pts): Does it explain HOW each change prevents the vulnerability?
-  - ✅ EXCELLENT (2.0 pts): "The `if (!idev)` check at Line 8 causes early return with error code, preventing execution from reaching the dereference `idev->cnf` at Line 12. Control flow: error path exits before vulnerable operation."
-  - ✅ GOOD (1.5 pts): "NULL check prevents reaching the dereference"
-  - ⚠️ PARTIAL (0.5 pts): "Check prevents the bug"
+  - EXCELLENT (2.0 pts): "The `if (!idev)` check at Line 8 causes early return with error code, preventing execution from reaching the dereference `idev->cnf` at Line 12. Control flow: error path exits before vulnerable operation."
+  - GOOD (1.5 pts): "NULL check prevents reaching the dereference"
+  - PARTIAL (0.5 pts): "Check prevents the bug"
   - Must explain control flow OR data flow changes
 
 - **Completeness Analysis** (1.0 pt): Does it assess whether the patch is complete or partial?
-  - ✅ EXCELLENT (1.0 pt): "Patch fully addresses the vulnerability by adding checks at all 3 user input paths (lines 10, 15, 20). No other unguarded uses of user data exist in this function."
-  - ✅ GOOD (0.7 pt): "Patch handles the main path but potential edge case at Line 25 remains"
-  - ⚠️ PARTIAL (0.3 pt): Mentions "patch fixes the issue" without analysis
-  - ❌ NONE (0 pt): No discussion of completeness
+  - EXCELLENT (1.0 pt): "Patch fully addresses the vulnerability by adding checks at all 3 user input paths (lines 10, 15, 20). No other unguarded uses of user data exist in this function."
+  - GOOD (0.7 pt): "Patch handles the main path but potential edge case at Line 25 remains"
+  - PARTIAL (0.3 pt): Mentions "patch fixes the issue" without analysis
+  - NONE (0 pt): No discussion of completeness
 
   **Explanations with causal analysis** can better assess completeness by checking if all causal paths are blocked.
   **Post-hoc explanations** typically cannot assess this → if unclear, score ≤ 0.5
@@ -953,10 +953,10 @@ Evaluate both explanations on the following dimensions (1-5 scale, where 5 is be
 - **0.5**: "Patch fixes it" with no specifics
 
 **MANDATORY PENALTIES:**
-- ⛔ **Missing code changes** (describes 1 out of 3 changes) → maximum score 2.5
-- ⛔ **No line numbers or locations** → maximum score 3.0
-- ⛔ **No mechanism explanation** → maximum score 2.5
-- ⛔ **No completeness discussion** → maximum score 4.0
+- **Missing code changes** (describes 1 out of 3 changes) → maximum score 2.5
+- **No line numbers or locations** → maximum score 3.0
+- **No mechanism explanation** → maximum score 2.5
+- **No completeness discussion** → maximum score 4.0
 
 **RED FLAGS:**
 - Lists code changes as dry inventory without explaining their purpose
@@ -972,10 +972,10 @@ Evaluate both explanations on the following dimensions (1-5 scale, where 5 is be
 
 **Criteria:**
 - **Concrete Causal Path** (2.5 pts): Does it trace the vulnerability through **specific code locations with variable names and line numbers**?
-  - ✅ EXCELLENT (2.5 pts): "At line 45, unchecked index `i` is used in `array[i]`. If `i >= array_size` (from line 40 input), this causes OOB access at line 45. The vulnerability path: Line 40 (user input) → Line 42 (no validation) → Line 45 (OOB write)"
-  - ✅ GOOD (1.5-2.0 pts): "`strcpy(buf, user_input)` at Line 10 has no bounds check. If `user_input` length > 256 (buf size), overflow occurs."
-  - ⚠️ PARTIAL (0.5-1.0 pts): "Buffer overflow occurs when input is large" (missing line numbers, variable names)
-  - ❌ WEAK (0 pts): "The vulnerability occurs due to missing validation" (pure abstraction, no code details)
+  - EXCELLENT (2.5 pts): "At line 45, unchecked index `i` is used in `array[i]`. If `i >= array_size` (from line 40 input), this causes OOB access at line 45. The vulnerability path: Line 40 (user input) → Line 42 (no validation) → Line 45 (OOB write)"
+  - GOOD (1.5-2.0 pts): "`strcpy(buf, user_input)` at Line 10 has no bounds check. If `user_input` length > 256 (buf size), overflow occurs."
+  - PARTIAL (0.5-1.0 pts): "Buffer overflow occurs when input is large" (missing line numbers, variable names)
+  - WEAK (0 pts): "The vulnerability occurs due to missing validation" (pure abstraction, no code details)
 
   **CRITICAL**: **Post-hoc explanations** that only describe the patch's effect (e.g., "NULL check prevents crash") WITHOUT analyzing the original vulnerability path → **maximum 0.8 pt**
 
@@ -985,15 +985,15 @@ Evaluate both explanations on the following dimensions (1-5 scale, where 5 is be
   3. The propagation sequence (A → B → C)
 
 - **Intervention Mechanism** (1.5 pts): Does it explain HOW the patch breaks the causal path and WHY this location is chosen?
-  - ✅ EXCELLENT (1.5 pts): "The patch adds `if (i >= size) return -1;` at Line 44, BEFORE the array access at Line 45. This blocks the causal path by preventing untrusted `i` from reaching the vulnerable array indexing operation. This location is optimal because it's the last point before the vulnerability occurs."
-  - ⚠️ PARTIAL (0.5 pts): "Patch adds size check to prevent overflow" (no location, no mechanism)
-  - ❌ WEAK (0 pts): "Patch fixes the issue by validating input"
+  - EXCELLENT (1.5 pts): "The patch adds `if (i >= size) return -1;` at Line 44, BEFORE the array access at Line 45. This blocks the causal path by preventing untrusted `i` from reaching the vulnerable array indexing operation. This location is optimal because it's the last point before the vulnerability occurs."
+  - PARTIAL (0.5 pts): "Patch adds size check to prevent overflow" (no location, no mechanism)
+  - WEAK (0 pts): "Patch fixes the issue by validating input"
 
   **MUST explain**: Which specific step in the causal path is blocked + Why this intervention point is effective
 
 - **Counterfactual Reasoning** (1.0 pt): Does it contrast behavior with/without the patch using concrete examples?
-  - ✅ EXCELLENT: "Without patch: `i=300` (from input) → `array[300]` → OOB write. With patch: `i=300` → `if (i >= 256)` → early return → no OOB."
-  - ⚠️ PARTIAL: "Patch prevents overflow by checking size"
+  - EXCELLENT: "Without patch: `i=300` (from input) → `array[300]` → OOB write. With patch: `i=300` → `if (i >= 256)` → early return → no OOB."
+  - PARTIAL: "Patch prevents overflow by checking size"
 
 **Scoring Guidelines:**
 - **5.0**: Complete causal path (variables + lines + sequence) + Intervention mechanism with location + Counterfactual
@@ -1004,11 +1004,11 @@ Evaluate both explanations on the following dimensions (1-5 scale, where 5 is be
 - **0.5**: Incorrect or meaningless causal reasoning
 
 **MANDATORY PENALTIES (apply these strictly):**
-- ⛔ **No variable names or line numbers** → maximum score 1.5
-- ⛔ **Post-hoc only** (describes patch effect, not original vulnerability propagation) → maximum score 1.0
-- ⛔ **No intervention mechanism** (doesn't explain which causal step is blocked) → maximum score 2.0
-- ⛔ **Generic terms only** ("improper validation", "insecure code") without specifics → maximum score 1.0
-- ⛔ **Missing propagation sequence** (doesn't show A → B → C flow) → maximum score 2.0
+- **No variable names or line numbers** → maximum score 1.5
+- **Post-hoc only** (describes patch effect, not original vulnerability propagation) → maximum score 1.0
+- **No intervention mechanism** (doesn't explain which causal step is blocked) → maximum score 2.0
+- **Generic terms only** ("improper validation", "insecure code") without specifics → maximum score 1.0
+- **Missing propagation sequence** (doesn't show A → B → C flow) → maximum score 2.0
 
 **Examples of scoring:**
 

@@ -432,7 +432,7 @@ def merge_distributed_results(server_dirs: List[Path], output_dir: Path,
 
     if not models:
         if verbose:
-            print("⚠️  No model subdirectories found")
+            print("[WARN]  No model subdirectories found")
         models = {'_root'}
 
     # Apply model filter
@@ -505,7 +505,7 @@ def merge_distributed_results(server_dirs: List[Path], output_dir: Path,
                 json.dump(merged_result, f, indent=2)
 
             if verbose:
-                print(f"  ✅ {condition}: {len(merged_cases)} cases, "
+                print(f"  [OK] {condition}: {len(merged_cases)} cases, "
                       f"success rate: {metrics.get('success_rate', 0):.1%}")
 
     # Merge incomplete patches
@@ -540,9 +540,9 @@ def merge_distributed_results(server_dirs: List[Path], output_dir: Path,
 
         total_patches = sum(len(p) for p in merged_incomplete.values())
         if verbose:
-            print(f"  ✅ Total: {len(merged_incomplete)} cases, {total_patches} patches")
+            print(f"  [OK] Total: {len(merged_incomplete)} cases, {total_patches} patches")
 
-    completion_msg = f"\n✅ Merge complete: {output_dir}/" if verbose else f"✅ Merge complete: {output_dir}/"
+    completion_msg = f"\n[OK] Merge complete: {output_dir}/" if verbose else f"[OK] Merge complete: {output_dir}/"
     print(completion_msg)
 
     return output_dir
@@ -654,13 +654,13 @@ def run_llm_judge_on_file(result_path: Path, *, batch_size: int = 5,
             data = json.load(f)
     except FileNotFoundError:
         if verbose:
-            print(f"❌ File not found: {result_path}")
+            print(f"[ERROR] File not found: {result_path}")
         return False
 
     cases = data.get('cases', [])
     if not cases:
         if verbose:
-            print(f"⚠️  No cases found in {result_path}")
+            print(f"[WARN]  No cases found in {result_path}")
         return False
 
     def _extract_text(payload: Any) -> str:
@@ -712,11 +712,11 @@ def run_llm_judge_on_file(result_path: Path, *, batch_size: int = 5,
 
     if not prompts:
         if verbose:
-            print(f"⚠️  {result_path.name}: No valid explanations for judge evaluation")
+            print(f"[WARN]  {result_path.name}: No valid explanations for judge evaluation")
         return False
 
     if verbose:
-        print(f"🤖 {result_path.name}: Running LLM judge on {len(prompts)} case(s) (batch size {batch_size})")
+        print(f"[LLM] {result_path.name}: Running LLM judge on {len(prompts)} case(s) (batch size {batch_size})")
 
     scores = LLMClient.batch_score_explanations(prompts, max_workers=batch_size)
 
@@ -725,7 +725,7 @@ def run_llm_judge_on_file(result_path: Path, *, batch_size: int = 5,
         if not score_text:
             if verbose:
                 case_id = cases[idx].get('case_id', f'case_{idx}')
-                print(f"  ⚠️  No judge response for {case_id}")
+                print(f"  [WARN]  No judge response for {case_id}")
             continue
 
         try:
@@ -733,7 +733,7 @@ def run_llm_judge_on_file(result_path: Path, *, batch_size: int = 5,
         except json.JSONDecodeError:
             if verbose:
                 case_id = cases[idx].get('case_id', f'case_{idx}')
-                print(f"  ⚠️  Invalid judge JSON for {case_id}")
+                print(f"  [WARN]  Invalid judge JSON for {case_id}")
             continue
 
         metrics = cases[idx].get('explanation_metrics')
@@ -753,7 +753,7 @@ def run_llm_judge_on_file(result_path: Path, *, batch_size: int = 5,
 
     if not updated:
         if verbose:
-            print(f"⚠️  {result_path.name}: Judge evaluation produced no usable scores")
+            print(f"[WARN]  {result_path.name}: Judge evaluation produced no usable scores")
         return False
 
     update_llm_metrics_summary(data)
@@ -763,7 +763,7 @@ def run_llm_judge_on_file(result_path: Path, *, batch_size: int = 5,
         json.dump(data, f, indent=2)
 
     if verbose:
-        print(f"✅ {result_path.name}: Judge scores updated")
+        print(f"[OK] {result_path.name}: Judge scores updated")
 
     return True
 
@@ -1282,7 +1282,7 @@ class RQAnalyzer:
         self.last_output_path = output_path
 
         if verbose:
-            print(f"\n✅ Analysis saved: {output_path}")
+            print(f"\n[OK] Analysis saved: {output_path}")
 
         # Generate markdown report
         md_path = output_path.with_suffix('.md')
@@ -1291,7 +1291,7 @@ class RQAnalyzer:
         self.last_markdown_path = md_path
 
         if verbose:
-            print(f"✅ Markdown report: {md_path}")
+            print(f"[OK] Markdown report: {md_path}")
 
         return report
 
@@ -1440,7 +1440,7 @@ class RQAnalyzer:
             print(f"    Clarity: {rq4.avg_clarity_score:.2f}")
             print(f"    Causality: {rq4.avg_causality_score:.2f}")
         else:
-            print(f"\n  ⚠️  LLM quality scores not available")
+            print(f"\n  [WARN]  LLM quality scores not available")
 
         if rq4.missing_item_frequency:
             print(f"\n  Most frequent missing items:")
@@ -1732,7 +1732,7 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
                 continue
 
             if verbose:
-                print(f"  ✅ Found: {model_name}")
+                print(f"  [OK] Found: {model_name}")
 
             # Load results
             with open(c4_file, 'r') as f:
@@ -1772,7 +1772,7 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
                     cond_data.get('metrics', {}).get('success_rate', 0)
 
     if not all_results:
-        print("❌ No results found")
+        print("[ERROR] No results found")
         return
 
     # Generate reports
@@ -1914,7 +1914,7 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
 
         print("=" * 70)
 
-    print(f"\n✅ Comparison report saved:")
+    print(f"\n[OK] Comparison report saved:")
     print(f"   JSON: {json_file}")
     print(f"   Markdown: {md_file}")
 
@@ -2027,11 +2027,11 @@ def generate_unified_summary(base_dir: Path, output_dir: Path,
         # Apply model filter
         if not should_include_model(model_name, model_filter):
             if verbose and model_filter:
-                print(f"⏭️  Skipping {model_name} (filtered out)")
+                print(f"[SKIP]  Skipping {model_name} (filtered out)")
             continue
 
         if verbose:
-            print(f"\n📊 Processing {model_name}...")
+            print(f"\n[ANALYZE] Processing {model_name}...")
 
         # Load results for each condition
         for condition in ['c1', 'c2', 'c3', 'c4']:
@@ -2075,16 +2075,16 @@ def generate_unified_summary(base_dir: Path, output_dir: Path,
                 }
 
                 if verbose:
-                    print(f"  ✅ {condition.upper()}: {metrics.get('success_rate', 0):.1%} success "
+                    print(f"  [OK] {condition.upper()}: {metrics.get('success_rate', 0):.1%} success "
                           f"({int(metrics.get('total_cases', 0))} cases)")
 
             except Exception as e:
                 if verbose:
-                    print(f"  ⚠️  Failed to load {condition}: {e}")
+                    print(f"  [WARN]  Failed to load {condition}: {e}")
                 continue
 
     if not all_data:
-        print("❌ No data found")
+        print("[ERROR] No data found")
         return
 
     # Compute aggregate metrics across models
@@ -2114,7 +2114,7 @@ def generate_unified_summary(base_dir: Path, output_dir: Path,
     if verbose:
         _print_unified_console(all_data, aggregated_data)
 
-    print(f"\n✅ Unified summary saved:")
+    print(f"\n[OK] Unified summary saved:")
     print(f"   JSON: {json_file}")
     print(f"   Markdown: {md_file}")
 
@@ -2887,7 +2887,7 @@ Note:
         if not json_path:
             return
         condition_label = analyzer.condition.upper() if analyzer.condition else 'N/A'
-        print(f"✅ {analyzer.model} ({condition_label}) analysis saved")
+        print(f"[OK] {analyzer.model} ({condition_label}) analysis saved")
         print(f"   JSON: {json_path}")
         if md_path:
             print(f"   Markdown: {md_path}")
@@ -2899,16 +2899,16 @@ Note:
         args.judge_batch_size = 1
 
     if verbose and model_filter:
-        print(f"\n🔍 Model filter active: {', '.join(model_filter)}")
+        print(f"\n[SEARCH] Model filter active: {', '.join(model_filter)}")
 
     if (args.merge or args.compare) and args.run_judge and verbose:
-        print("⚠️  --run-judge is ignored in merge/compare mode")
+        print("[WARN]  --run-judge is ignored in merge/compare mode")
 
     try:
         # Unified summary mode
         if args.unified:
             if len(args.input_paths) != 1 or not args.input_paths[0].is_dir():
-                print("❌ --unified requires exactly one directory path")
+                print("[ERROR] --unified requires exactly one directory path")
                 sys.exit(1)
 
             base_dir = args.input_paths[0]
@@ -2921,7 +2921,7 @@ Note:
             server_dirs = [p for p in args.input_paths if p.is_dir()]
 
             if not server_dirs:
-                print("❌ No server directories found")
+                print("[ERROR] No server directories found")
                 sys.exit(1)
 
             output_dir = args.output if args.output else Path('results/merged')
@@ -2967,12 +2967,12 @@ Note:
                     model_name = input_path.parent.name
                     if not should_include_model(model_name, model_filter):
                         if verbose and model_filter:
-                            print(f"⏭️  Skipping {model_name} (filtered out)")
+                            print(f"[SKIP]  Skipping {model_name} (filtered out)")
                         continue
 
                     if args.run_judge:
                         if verbose:
-                            print(f"\n🤖 Running judge for {input_path}")
+                            print(f"\n[LLM] Running judge for {input_path}")
                         if run_llm_judge_on_file(input_path, batch_size=args.judge_batch_size,
                                                   verbose=verbose):
                             judge_updates += 1
@@ -2999,7 +2999,7 @@ Note:
 
                     if not model_dirs:
                         if verbose:
-                            print(f"⚠️  No model directories found in {input_path}")
+                            print(f"[WARN]  No model directories found in {input_path}")
                         continue
 
                     models_analyzed = set()
@@ -3011,7 +3011,7 @@ Note:
 
                         if not should_include_model(model_name, model_filter):
                             if verbose and model_filter:
-                                print(f"⏭️  Skipping {model_name} (filtered out)")
+                                print(f"[SKIP]  Skipping {model_name} (filtered out)")
                             continue
 
                         # Resolve to most recent timestamp directory
@@ -3031,7 +3031,7 @@ Note:
                     if not result_files:
                         if verbose:
                             cond_str = "C1-C4" if args.all_conditions else "C4"
-                            print(f"⚠️  No {cond_str} result files found in {input_path}")
+                            print(f"[WARN]  No {cond_str} result files found in {input_path}")
                         continue
 
                     for result_file in sorted(result_files):
@@ -3046,7 +3046,7 @@ Note:
 
                         if args.run_judge:
                             if verbose:
-                                print(f"\n🤖 Running judge for {model_name} - {condition.upper()}")
+                                print(f"\n[LLM] Running judge for {model_name} - {condition.upper()}")
                             if run_llm_judge_on_file(result_file, batch_size=args.judge_batch_size,
                                                       verbose=verbose):
                                 judge_updates += 1
@@ -3055,7 +3055,7 @@ Note:
                             continue
 
                         if verbose:
-                            print(f"\n📊 Analyzing {model_name} - {condition.upper()}")
+                            print(f"\n[ANALYZE] Analyzing {model_name} - {condition.upper()}")
 
                         analyzer = RQAnalyzer(result_file)
                         analyzer.generate_comprehensive_report(verbose=verbose)
@@ -3072,37 +3072,37 @@ Note:
                 if verbose:
                     print_header("Judge Evaluation Complete")
                     if judge_updates:
-                        print(f"\n✅ Updated {judge_updates} file(s) with judge scores\n")
+                        print(f"\n[OK] Updated {judge_updates} file(s) with judge scores\n")
                     else:
-                        print("\n⚠️  LLM judge did not update any files\n")
+                        print("\n[WARN]  LLM judge did not update any files\n")
                 else:
-                    print(f"✅ LLM judge finished - updated {judge_updates} file(s)")
+                    print(f"[OK] LLM judge finished - updated {judge_updates} file(s)")
                 sys.exit(0)
 
             if results_analyzed == 0:
-                print("❌ No results found to analyze")
+                print("[ERROR] No results found to analyze")
                 sys.exit(1)
 
             if verbose:
                 if args.run_judge:
                     print_header("Judge Evaluation Summary")
                     if judge_updates:
-                        print(f"\n✅ Updated {judge_updates} file(s) with judge scores")
+                        print(f"\n[OK] Updated {judge_updates} file(s) with judge scores")
                     else:
-                        print("\n⚠️  LLM judge did not update any files")
+                        print("\n[WARN]  LLM judge did not update any files")
                     print("")
                 print_header("Analysis Complete")
-                print(f"\n✅ Analyzed {results_analyzed} result file(s)\n")
+                print(f"\n[OK] Analyzed {results_analyzed} result file(s)\n")
             else:
                 if args.run_judge:
-                    print(f"✅ Judge evaluation complete - updated {judge_updates} file(s)")
-                print(f"✅ Analyzed {results_analyzed} result file(s)")
+                    print(f"[OK] Judge evaluation complete - updated {judge_updates} file(s)")
+                print(f"[OK] Analyzed {results_analyzed} result file(s)")
 
     except KeyboardInterrupt:
-        print("\n\n⚠️  Analysis interrupted by user\n")
+        print("\n\n[WARN]  Analysis interrupted by user\n")
         sys.exit(130)
     except Exception as e:
-        print(f"\n❌ Analysis failed: {e}\n")
+        print(f"\n[ERROR] Analysis failed: {e}\n")
         import traceback
         traceback.print_exc()
         sys.exit(1)

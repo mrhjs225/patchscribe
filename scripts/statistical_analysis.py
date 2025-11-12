@@ -257,9 +257,9 @@ def main():
             monotonicity = analyze_monotonicity(scores_by_condition)
 
             if monotonicity['is_monotonic']:
-                f.write("✅ Scores show monotonic increase (C1 ≤ C2 ≤ C3 ≤ C4)\n")
+                f.write("[PASS] Scores show monotonic increase (C1 ≤ C2 ≤ C3 ≤ C4)\n")
             else:
-                f.write("❌ Scores do NOT show monotonic increase\n")
+                f.write("[FAIL] Scores do NOT show monotonic increase\n")
                 f.write("Violations:\n")
                 for violation in monotonicity['violations']:
                     f.write(f"  - {violation}\n")

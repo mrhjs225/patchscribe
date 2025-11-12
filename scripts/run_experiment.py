@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-PatchScribe 통합 실험 스크립트
+PatchScribe Integrated Experiment Script
 
-로컬 및 분산 환경에서 모든 모델과 조건에 대한 실험을 실행합니다.
-이 스크립트 하나로 전체 실험 워크플로우를 처리합니다.
+Runs experiments for all models and conditions in local and distributed environments.
+This single script handles the entire experimental workflow.
 
-사용 예시:
-    # 로컬 실험 (3개 케이스로 빠른 테스트)
+Usage examples:
+    # Local experiment (quick test with 3 cases)
     python3 scripts/run_experiment.py --quick
 
-    # 로컬 실험 (전체)
+    # Local experiment (full)
     python3 scripts/run_experiment.py --dataset zeroday --limit 10
 
-    # 분산 실험 (Server 0, 4대 서버 중)
+    # Distributed experiment (Server 0 out of 4 servers)
     python3 scripts/run_experiment.py --distributed 0 4 20 --dataset zeroday
 
-    # 특정 모델과 조건만
+    # Specific model and condition only
     python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
         --llm-provider openai --models gpt-5-mini \
         --conditions c4
@@ -358,14 +358,14 @@ class IncompletePatchGenerator:
 
 
 def print_header(title: str, width: int = 70):
-    """헤더 출력"""
+    """Print header"""
     print("\n" + "=" * width)
     print(f"  {title}")
     print("=" * width)
 
 
 def calculate_case_allocation(server_id: int, num_servers: int, total_cases: int) -> Tuple[int, int]:
-    """각 서버에 할당할 케이스 범위 계산"""
+    """Calculate case range to allocate to each server"""
     cases_per_server = total_cases // num_servers
     remainder = total_cases % num_servers
 
@@ -380,7 +380,7 @@ def calculate_case_allocation(server_id: int, num_servers: int, total_cases: int
 
 
 def load_cases(dataset: str, start_index: int = 0, count: int = None) -> List[Dict]:
-    """케이스 로드"""
+    """Load cases"""
     from patchscribe.dataset import load_cases as load_dataset_cases
 
     all_cases = load_dataset_cases(dataset)
@@ -392,7 +392,7 @@ def load_cases(dataset: str, start_index: int = 0, count: int = None) -> List[Di
 
 
 def get_condition_settings(condition: str) -> Tuple[str, bool]:
-    """조건에 맞는 설정 반환"""
+    """Return settings matching the condition"""
     settings = {
         'c1': ('only_natural', False),  # Baseline: Post-hoc natural language
         'c2': ('natural', False),        # Vague hints
@@ -403,7 +403,7 @@ def get_condition_settings(condition: str) -> Tuple[str, bool]:
 
 
 def _supports_parallel_conditions(model_spec: str, llm_config: Dict[str, object]) -> bool:
-    """특정 모델이 조건 병렬 실행을 안전하게 지원하는지 여부."""
+    """Whether a specific model safely supports parallel condition execution."""
     provider = (llm_config.get('provider') or 'openai').lower()
     concurrency = llm_config.get('concurrency')
     if not concurrency or concurrency <= 1:
@@ -432,11 +432,11 @@ def run_single_evaluation(
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
 ) -> Dict:
-    """단일 모델 × 조건에 대한 평가 실행"""
+    """Run evaluation for a single model × condition"""
     from patchscribe.pipeline import PatchScribePipeline
     from patchscribe.evaluation import Evaluator
 
-    # 모델 스펙 파싱
+    # Parse model spec
     model_name = model_spec
 
     provider = (llm_config.get('provider') or 'openai').lower()
@@ -454,7 +454,7 @@ def run_single_evaluation(
         provider == 'gemini' and model_basename in CONCURRENCY_ALLOWED_MODELS.get('gemini', set())
     )
 
-    # 환경 변수 설정 (provider 별로 동작)
+    # Set environment variables (works per provider)
     if provider == 'gemini':
         endpoint = DEFAULT_GEMINI_ENDPOINT_TEMPLATE.format(model=model_name)
 
@@ -476,7 +476,7 @@ def run_single_evaluation(
     elif 'PATCHSCRIBE_LLM_MAX_TOKENS' in os.environ:
         del os.environ['PATCHSCRIBE_LLM_MAX_TOKENS']
 
-    # concurrency는 지원되는 모델에서만 사용
+    # Use concurrency only on supported models
     evaluator_kwargs: Dict[str, object] = {}
     if concurrency and concurrency_allowed:
         evaluator_kwargs['max_workers'] = max(1, int(concurrency))
@@ -485,14 +485,14 @@ def run_single_evaluation(
         if concurrency and verbose and not concurrency_allowed:
             allowed = ', '.join(sorted(CONCURRENCY_ALLOWED_MODELS.get(provider, set())))
             if allowed:
-                print(f"    ⚠️ LLM concurrency ignored (supported models: {allowed}).")
+                print(f"    [WARN] LLM concurrency ignored (supported models: {allowed}).")
             else:
-                print("    ⚠️ LLM concurrency ignored (no supported models for this provider).")
+                print("    [WARN] LLM concurrency ignored (no supported models for this provider).")
 
-    # 조건별 설정
+    # Condition-specific settings
     strategy, condition_consistency = get_condition_settings(condition)
 
-    # Consistency check: 조건 설정과 CLI 옵션 모두 고려
+    # Consistency check: consider both condition settings and CLI options
     final_consistency_check = condition_consistency and not disable_consistency_check
 
     if verbose:
@@ -501,7 +501,7 @@ def run_single_evaluation(
         print(f"    Strategy: {strategy}")
         print(f"    Consistency check: {final_consistency_check}")
 
-    # 파이프라인 설정
+    # Pipeline configuration
     pipeline = PatchScribePipeline(
         strategy=strategy,
         explain_mode='both',
@@ -512,27 +512,27 @@ def run_single_evaluation(
         prompt_options=prompt_options,
     )
 
-    # 평가 실행 (success judgment is done by evaluate_results.py)
+    # Run evaluation (success judgment is done by evaluate_results.py)
     evaluator = Evaluator(
         pipeline=pipeline,
         max_workers=evaluator_kwargs.get('max_workers'),
     )
     report = evaluator.run(cases)
 
-    # 결과 저장
+    # Save results
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, 'w') as f:
         json.dump(report.as_dict(), f, indent=2)
 
     success_rate = report.metrics.get('success_rate', 0)
     if verbose:
-        print(f"    ✅ Success rate: {success_rate:.1%}")
+        print(f"    [OK] Success rate: {success_rate:.1%}")
 
     return report.as_dict()
 
 
 def generate_incomplete_patches(cases: List[Dict], output_file: Path, verbose: bool = True) -> Dict:
-    """불완전 패치 생성 (RQ2)"""
+    """Generate incomplete patches (RQ2)"""
     if verbose:
         print(f"\nGenerating incomplete patches for {len(cases)} cases...")
 
@@ -560,17 +560,17 @@ def generate_incomplete_patches(cases: List[Dict], output_file: Path, verbose: b
             ]
         except Exception as e:
             if verbose:
-                print(f"  ⚠️ Failed for case {case_id}: {e}")
+                print(f"  [WARN] Failed for case {case_id}: {e}")
             continue
 
-    # 저장
+    # Save
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, 'w') as f:
         json.dump(all_patches, f, indent=2)
 
     total_patches = sum(len(p) for p in all_patches.values())
     if verbose:
-        print(f"  ✅ Generated {total_patches} patches for {len(all_patches)} cases")
+        print(f"  [OK] Generated {total_patches} patches for {len(all_patches)} cases")
 
     return all_patches
 
@@ -592,17 +592,17 @@ def run_experiment(
     force_stage1_recompute: bool = False,
     precompute_stage1_only: bool = False,
 ):
-    """통합 실험 실행
+    """Run integrated experiment
 
     Args:
-        parallel_conditions: True면 모든 (모델, condition) 조합을 병렬 처리
-        disable_consistency_check: E_bug/E_patch 일관성 체크 비활성화
-        stage1_cache_dir: Stage-1 캐시 경로 (None이면 비활성)
-        force_stage1_recompute: 캐시에 있더라도 Stage-1 재계산 여부
-        precompute_stage1_only: True면 캐시만 채우고 LLM 호출 없이 종료
+        parallel_conditions: If True, process all (model, condition) combinations in parallel
+        disable_consistency_check: Disable E_bug/E_patch consistency check
+        stage1_cache_dir: Stage-1 cache path (disabled if None)
+        force_stage1_recompute: Whether to recompute Stage-1 even if in cache
+        precompute_stage1_only: If True, only fill cache and exit without LLM calls
     """
 
-    # 케이스 로드
+    # Load cases
     if verbose:
         print(f"\nLoading cases from dataset: {dataset}")
 
@@ -623,7 +623,7 @@ def run_experiment(
             force_stage1_recompute=force_stage1_recompute,
             verbose=verbose,
         )
-        print("\n✅ Stage-1 artifacts cached for all assigned cases.")
+        print("\n[OK] Stage-1 artifacts cached for all assigned cases.")
         return []
 
     run_label = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -641,7 +641,7 @@ def run_experiment(
 
     print_header("Running Experiments: All Models × All Conditions")
 
-    # 병렬 처리 모드 선택
+    # Select parallel processing mode
     if parallel_conditions:
         results_summary = _run_experiment_parallel(
             cases, models, conditions, output_dir, llm_config,
@@ -655,7 +655,7 @@ def run_experiment(
             stage1_cache_dir, force_stage1_recompute
         )
 
-    # 불완전 패치 생성 (RQ2)
+    # Generate incomplete patches (RQ2)
     if generate_incomplete:
         print_header("Generating Incomplete Patches (RQ2)")
 
@@ -669,11 +669,11 @@ def run_experiment(
 
         except Exception as e:
             if verbose:
-                print(f"❌ Failed to generate incomplete patches: {e}")
+                print(f"[ERROR] Failed to generate incomplete patches: {e}")
                 import traceback
                 traceback.print_exc()
 
-    # 실험 완료 요약
+    # Experiment completion summary
     print_header("Experiment Summary")
 
     print("\nResults by model:")
@@ -681,13 +681,13 @@ def run_experiment(
         print(f"\n  {model_result['model']}:")
         for condition, info in model_result['conditions'].items():
             if 'error' in info:
-                print(f"    {condition}: ❌ {info['error'][:50]}...")
+                print(f"    {condition}: [ERROR] {info['error'][:50]}...")
             else:
                 print(f"    {condition}: {info['success_rate']:.1%} success")
 
-    print(f"\n📁 Results saved to: {output_dir}/")
+    print(f"\nResults saved to: {output_dir}/")
 
-    # 생성된 주요 파일 목록
+    # List of main generated files
     print("\nGenerated files:")
     for model_spec in models:
         model_name = model_spec.split(':', 1)[1] if ':' in model_spec else model_spec
@@ -707,9 +707,9 @@ def run_experiment(
     print_header("Next Steps")
 
     if server_id is not None:
-        print("\n분산 실험 - 다음 단계:")
-        print("1. 모든 서버에서 실험이 완료될 때까지 대기")
-        print("2. 중앙 서버에서 결과 수집:")
+        print("\nDistributed experiment - Next steps:")
+        print("1. Wait until experiments complete on all servers")
+        print("2. Collect results on central server:")
         print("   scp -r user@server0:~/patchscribe/results/server0 results/")
 
 
@@ -726,7 +726,7 @@ def _run_experiment_sequential(
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
 ) -> List[Dict]:
-    """순차 처리 모드 (기존 동작)"""
+    """Sequential processing mode (original behavior)"""
     results_summary = []
 
     for model_spec in models:
@@ -736,7 +736,7 @@ def _run_experiment_sequential(
         print(f"  MODEL: {model_name}")
         print(f"{'#' * 70}")
 
-        # 모델별 결과 디렉토리
+        # Model-specific results directory
         model_output_dir = _model_output_dir(output_dir, model_name, run_label)
         model_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -745,9 +745,9 @@ def _run_experiment_sequential(
             'conditions': {}
         }
 
-        # 모든 조건 실행
+        # Run all conditions
         for condition in conditions:
-            # 결과 파일명
+            # Results filename
             if server_id is not None:
                 result_filename = f"{condition}_server{server_id}_results.json"
             else:
@@ -773,14 +773,14 @@ def _run_experiment_sequential(
                 }
 
                 if verbose:
-                    print(f"    ✅ Condition {condition} completed")
+                    print(f"    [OK] Condition {condition} completed")
 
             except KeyboardInterrupt:
-                print("\n\n⚠️  Interrupted by user")
+                print("\n\n[INTERRUPT] Interrupted by user")
                 sys.exit(130)
             except Exception as e:
                 if verbose:
-                    print(f"    ❌ Failed: {e}")
+                    print(f"    [ERROR] Failed: {e}")
                     import traceback
                     traceback.print_exc()
                 model_results['conditions'][condition] = {
@@ -792,7 +792,7 @@ def _run_experiment_sequential(
         results_summary.append(model_results)
 
         if verbose:
-            print(f"\n✅ Model {model_name} completed")
+            print(f"\n[OK] Model {model_name} completed")
 
     return results_summary
 
@@ -810,7 +810,7 @@ def _run_experiment_parallel(
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
 ) -> List[Dict]:
-    """병렬 처리 모드: 모든 (모델, condition) 조합을 동시에 처리"""
+    """Parallel processing mode: Process all (model, condition) combinations concurrently"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import threading
 
@@ -841,23 +841,23 @@ def _run_experiment_parallel(
 
     total_tasks = len(parallel_tasks) + len(sequential_tasks)
     if verbose:
-        print(f"\n🚀 Starting {total_tasks} tasks (parallel where safe)...")
+        print(f"\nStarting {total_tasks} tasks (parallel where safe)...")
         print(f"   Models: {len(models)}")
         print(f"   Conditions: {len(conditions)}")
         print(f"   Parallel combinations: {len(parallel_tasks)}")
         if sequential_models:
             print(f"   Sequential only: {', '.join(sorted(sequential_models))}")
 
-    # 출력용 Lock
+    # Lock for output
     print_lock = threading.Lock()
 
     def run_task(task_info):
-        """단일 (모델, condition) 실행"""
+        """Run single (model, condition)"""
         model_spec, model_name, condition, output_file = task_info
 
         try:
             with print_lock:
-                print(f"  ▶ Starting: {model_name} - {condition}")
+                print(f"  [START] Starting: {model_name} - {condition}")
 
             result = run_single_evaluation(
                 cases,
@@ -866,14 +866,14 @@ def _run_experiment_parallel(
                 output_file,
                 llm_config=llm_config,
                 disable_consistency_check=disable_consistency_check,
-                verbose=False,  # 병렬 실행시 개별 verbose 끔
+                verbose=False,  # Turn off individual verbose during parallel execution
                 stage1_cache_dir=stage1_cache_dir,
                 force_stage1_recompute=force_stage1_recompute,
             )
 
             with print_lock:
                 success_rate = result['metrics'].get('success_rate', 0)
-                print(f"  ✅ Completed: {model_name} - {condition} ({success_rate:.1%})")
+                print(f"  [OK] Completed: {model_name} - {condition} ({success_rate:.1%})")
 
             return (model_name, condition, {
                 'success_rate': success_rate,
@@ -884,7 +884,7 @@ def _run_experiment_parallel(
             raise
         except Exception as e:
             with print_lock:
-                print(f"  ❌ Failed: {model_name} - {condition}: {str(e)[:50]}")
+                print(f"  [ERROR] Failed: {model_name} - {condition}: {str(e)[:50]}")
 
             return (model_name, condition, {
                 'success_rate': 0,
@@ -898,15 +898,15 @@ def _run_experiment_parallel(
             results_dict[model_name] = {'model': model_name, 'conditions': {}}
         results_dict[model_name]['conditions'][condition] = result_info
 
-    # sequential runs (no safe shared parallelism)
+    # Sequential runs (no safe shared parallelism)
     if sequential_tasks:
         if verbose:
-            print("\n⚠️  Executing sequentially for non-concurrent models...")
+            print("\n[WARN] Executing sequentially for non-concurrent models...")
         for task in sequential_tasks:
             model_name, condition, result_info, error = run_task(task)
             record_result(model_name, condition, result_info)
 
-    # 병렬 실행 (안전한 모델만)
+    # Parallel execution (safe models only)
     if parallel_tasks:
         try:
             with ThreadPoolExecutor(max_workers=len(parallel_tasks)) as executor:
@@ -918,20 +918,20 @@ def _run_experiment_parallel(
                         record_result(model_name, condition, result_info)
 
                     except KeyboardInterrupt:
-                        print("\n\n⚠️  Interrupted by user")
+                        print("\n\n[INTERRUPT] Interrupted by user")
                         executor.shutdown(wait=False, cancel_futures=True)
                         sys.exit(130)
                     except Exception as e:
                         if verbose:
-                            print(f"  ❌ Unexpected error: {e}")
+                            print(f"  [ERROR] Unexpected error: {e}")
                             import traceback
                             traceback.print_exc()
 
         except KeyboardInterrupt:
-            print("\n\n⚠️  Interrupted by user")
+            print("\n\n[INTERRUPT] Interrupted by user")
             sys.exit(130)
 
-    # 결과를 모델 순서대로 정렬
+    # Sort results by model order
     results_summary = [results_dict[model_spec.split(':', 1)[1] if ':' in model_spec else model_spec]
                        for model_spec in models if (model_spec.split(':', 1)[1] if ':' in model_spec else model_spec) in results_dict]
 
@@ -940,7 +940,7 @@ def _run_experiment_parallel(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='PatchScribe 통합 실험 스크립트',
+        description='PatchScribe Integrated Experiment Script',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 실행 모드:
@@ -1220,15 +1220,15 @@ def main():
         )
 
         if args.precompute_stage1:
-            print("\n✅ Stage-1 caching completed successfully!\n")
+            print("\n[OK] Stage-1 caching completed successfully!\n")
         else:
-            print("\n✅ Experiment completed successfully!\n")
+            print("\n[OK] Experiment completed successfully!\n")
 
     except KeyboardInterrupt:
-        print("\n\n⚠️  Experiment interrupted by user\n")
+        print("\n\n[INTERRUPT] Experiment interrupted by user\n")
         sys.exit(130)
     except Exception as e:
-        print(f"\n❌ Experiment failed: {e}\n")
+        print(f"\n[ERROR] Experiment failed: {e}\n")
         import traceback
         traceback.print_exc()
         sys.exit(1)

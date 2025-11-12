@@ -85,7 +85,7 @@ class Evaluator:
         self.max_workers = max_workers or mp.cpu_count()
 
     def _compute_metrics(self, evaluations: List[CaseEvaluation]) -> Dict[str, float]:
-        """평가 결과 리스트로부터 메트릭을 계산"""
+        """Calculate metrics from evaluation results list"""
         total = len(evaluations)
         if total == 0:
             return {
@@ -253,16 +253,16 @@ class Evaluator:
         return metrics
 
     def run_parallel(self, cases: Iterable[Dict[str, object]]) -> EvaluationReport:
-        """케이스를 병렬로 평가"""
+        """Evaluate cases in parallel"""
         cases_list = list(cases)
         if not cases_list:
             return EvaluationReport(cases=[], metrics=self._compute_metrics([]))
 
         evaluations: List[CaseEvaluation] = []
 
-        # ProcessPoolExecutor를 사용하여 병렬 실행
+        # Parallel execution using ProcessPoolExecutor
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
-            # 각 케이스에 대해 future 생성
+            # Create futures for each case
             future_to_idx = {
                 executor.submit(
                     _evaluate_case_wrapper,
@@ -273,7 +273,7 @@ class Evaluator:
                 for idx, case in enumerate(cases_list, 1)
             }
 
-            # 진행 상황 표시 설정
+            # Setup progress bar
             if tqdm is not None:
                 progress_bar = tqdm(
                     total=len(cases_list),
@@ -283,7 +283,7 @@ class Evaluator:
             else:
                 progress_bar = None
 
-            # 완료되는 대로 결과 수집
+            # Collect results as they complete
             for future in as_completed(future_to_idx):
                 idx = future_to_idx[future]
                 try:
@@ -291,7 +291,7 @@ class Evaluator:
                     evaluations.append(evaluation)
                     if progress_bar is not None:
                         progress_bar.update(1)
-                        # 성공/실패 상태를 진행바 설명에 추가
+                        # Add success/failure status to progress bar description
                         success_count = sum(1 for e in evaluations if e.actual_success)
                         progress_bar.set_postfix({"success": f"{success_count}/{len(evaluations)}"})
                 except Exception as exc:
@@ -303,12 +303,12 @@ class Evaluator:
             if progress_bar is not None:
                 progress_bar.close()
 
-        # 메트릭 계산
+        # Calculate metrics
         metrics = self._compute_metrics(evaluations)
         return EvaluationReport(cases=evaluations, metrics=metrics)
 
     def run_sequential(self, cases: Iterable[Dict[str, object]]) -> EvaluationReport:
-        """순차적으로 케이스를 평가하여 Ollama 요청이 겹치지 않도록 한다."""
+        """Evaluate cases sequentially to avoid overlapping Ollama requests."""
         cases_list = list(cases)
         if not cases_list:
             return EvaluationReport(cases=[], metrics=self._compute_metrics([]))
@@ -334,8 +334,8 @@ class Evaluator:
 
     def run(self, cases: Iterable[Dict[str, object]]) -> EvaluationReport:
         """
-        케이스를 평가. 기본적으로 병렬 실행을 사용.
-        순차 실행이 필요한 경우 max_workers=1로 설정.
+        Evaluate cases. Uses parallel execution by default.
+        Set max_workers=1 for sequential execution.
         """
         if self.max_workers <= 1:
             return self.run_sequential(cases)
@@ -385,9 +385,9 @@ def _evaluate_case_wrapper(
     pipeline: PatchScribePipeline,
 ) -> CaseEvaluation:
     """
-    병렬 실행을 위한 wrapper 함수.
-    ProcessPoolExecutor는 인스턴스 메서드를 직접 호출할 수 없으므로
-    모듈 레벨 함수가 필요함.
+    Wrapper function for parallel execution.
+    ProcessPoolExecutor cannot directly call instance methods,
+    so a module-level function is required.
 
     Note: Success judgment is NOT performed here - it will be done by evaluate_results.py
     """

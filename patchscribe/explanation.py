@@ -59,9 +59,9 @@ def build_natural_context(
     sections.append(
         "\n".join(
             [
-                "### 취약점 개요",
-                f"- 위치: line {vulnerability_line if vulnerability_line != -1 else '알 수 없음'}",
-                f"- 취약 조건: {vulnerability_desc or '(설명 없음)'}",
+                "### Vulnerability Overview",
+                f"- Location: line {vulnerability_line if vulnerability_line != -1 else 'unknown'}",
+                f"- Vulnerable condition: {vulnerability_desc or '(no description)'}",
             ]
         )
     )
@@ -70,20 +70,20 @@ def build_natural_context(
         sections.append(
             "\n".join(
                 [
-                    "### 형식 모델 해석",
-                    f"- 원래 취약 조건: {model.vulnerable_condition}",
-                    f"- 자연어 해설: { _humanize_condition(model.vulnerable_condition) }",
+                    "### Formal Model Interpretation",
+                    f"- Original vulnerable condition: {model.vulnerable_condition}",
+                    f"- Natural language explanation: { _humanize_condition(model.vulnerable_condition) }",
                 ]
             )
         )
 
     causal_chain = _format_causal_chain(graph)
     sections.append(
-        "### 인과 경로 분석\n"
+        "### Causal Path Analysis\n"
         + (
             causal_chain
             if causal_chain.strip()
-            else "- 인과 경로 정보를 찾을 수 없습니다."
+            else "- Unable to find causal path information."
         )
     )
 
@@ -408,16 +408,16 @@ def _build_llm_prompt(
     info_items: List[tuple[str, str]] = []
 
     if strategy in {"formal", "natural"}:
-        info_descriptions.append("- 형식적 PCG/SCM 분석 요약")
+        info_descriptions.append("- Formal PCG/SCM analysis summary")
         info_items.append(("Formal Context", prompt_context))
     if strategy in {"natural", "only_natural"}:
-        info_descriptions.append("- 인과적 자연어 설명")
+        info_descriptions.append("- Causal natural language explanation")
         info_items.append(("Causal Explanation", causal_context))
     if strategy in {"natural", "only_natural"}:
-        info_descriptions.append("- 패치 요약 (diff 미리보기 포함)")
+        info_descriptions.append("- Patch summary (including diff preview)")
         info_items.append(("Patch Summary", patch_summary))
 
-    info_descriptions.append("- 취약점 시그니처와 패치된 코드")
+    info_descriptions.append("- Vulnerability signature and patched code")
     info_items.append(("Vulnerability Signature", signature or "(signature unavailable)"))
     code_block = f"```c\n{patched_code.strip()}\n```"
     info_items.append(("Patched Code", code_block))
@@ -450,49 +450,49 @@ def _build_llm_prompt(
 
 def _humanize_condition(condition: str) -> str:
     if not condition:
-        return "조건 정보가 제공되지 않았습니다."
+        return "No condition information provided."
     text = condition
     replacements = {
-        "&&": " 그리고 ",
-        "AND": " 그리고 ",
-        "||": " 또는 ",
-        "OR": " 또는 ",
+        "&&": " and ",
+        "AND": " and ",
+        "||": " or ",
+        "OR": " or ",
         "!": " NOT ",
         "NOT": " NOT ",
         "==": " == ",
         "!=": " != ",
-        ">=": " 이상",
-        "<=": " 이하",
-        ">": " 초과",
-        "<": " 미만",
+        ">=": " >= ",
+        "<=": " <= ",
+        ">": " > ",
+        "<": " < ",
     }
     for src, dst in replacements.items():
         text = text.replace(src, dst)
     words = []
     for token in text.split():
         if token.startswith("V_"):
-            words.append(f"{token[2:]} 조건")
+            words.append(f"{token[2:]} condition")
         else:
             words.append(token)
     sentence = " ".join(words)
     sentence = sentence.replace("  ", " ").strip()
-    return sentence or "조건 정보가 제공되지 않았습니다."
+    return sentence or "No condition information provided."
 
 
 def _describe_interventions(graph: ProgramCausalGraph, spec: InterventionSpec) -> str:
     if not spec.interventions:
-        return "### 개입 계획 (원인 → 조치 → 기대 효과)\n- 생성된 개입이 없습니다."
+        return "### Intervention Plan (Cause → Action → Expected Effect)\n- No interventions generated."
 
-    lines: List[str] = ["### 개입 계획 (원인 → 조치 → 기대 효과)"]
+    lines: List[str] = ["### Intervention Plan (Cause → Action → Expected Effect)"]
     for item in spec.interventions:
         action = _enforce_to_text(graph, item.enforce)
-        target = "알 수 없음" if item.target_line < 0 else f"line {item.target_line}"
-        rationale = item.rationale or "추가 설명 없음"
-        lines.append(f"- 원인: {rationale}")
-        lines.append(f"  · 조치: {action}")
-        lines.append(f"  · 대상 위치: {target}")
-        expected = "취약 경로를 차단하도록 설계되었습니다."
-        lines.append(f"  · 기대 효과: {expected}")
+        target = "unknown" if item.target_line < 0 else f"line {item.target_line}"
+        rationale = item.rationale or "No additional explanation"
+        lines.append(f"- Cause: {rationale}")
+        lines.append(f"  · Action: {action}")
+        lines.append(f"  · Target location: {target}")
+        expected = "Designed to block vulnerable path."
+        lines.append(f"  · Expected effect: {expected}")
     return "\n".join(lines)
 
 
@@ -502,7 +502,7 @@ def _enforce_to_text(graph: ProgramCausalGraph, enforce: str) -> str:
         variable = enforce[len(prefix):]
         node = _node_from_variable(graph, variable)
         if node:
-            return f"{node.description} 조건을 차단"
+            return f"Block {node.description} condition"
     return enforce
 
 
@@ -512,15 +512,15 @@ def _node_from_variable(graph: ProgramCausalGraph, variable: str):
 
 
 def _describe_patch_changes(patch: PatchResult) -> str:
-    lines: List[str] = ["### 패치 변경 요약"]
-    lines.append(f"- 적용 방식: {patch.method}")
+    lines: List[str] = ["### Patch Change Summary"]
+    lines.append(f"- Application method: {patch.method}")
     if patch.applied_guards:
         guards = "; ".join(patch.applied_guards)
-        lines.append(f"- 추가된 가드: {guards}")
+        lines.append(f"- Added guards: {guards}")
     else:
-        lines.append("- 추가된 가드: 없음")
+        lines.append("- Added guards: None")
     if patch.notes:
-        lines.append(f"- 메모: {', '.join(patch.notes)}")
+        lines.append(f"- Notes: {', '.join(patch.notes)}")
     if patch.diff:
         diff_lines = [
             line
@@ -528,35 +528,35 @@ def _describe_patch_changes(patch: PatchResult) -> str:
             if line.startswith("+") or line.startswith("-")
         ][:10]
         if diff_lines:
-            lines.append("- 주요 코드 변경:")
+            lines.append("- Key code changes:")
             for entry in diff_lines:
                 lines.append(f"  {entry}")
     else:
-        lines.append("- 코드 diff가 생성되지 않았습니다.")
+        lines.append("- No code diff was generated.")
     return "\n".join(lines)
 
 
 def _describe_patch_effect(effect: dict) -> str:
-    lines: List[str] = ["### 패치 효과 분석"]
+    lines: List[str] = ["### Patch Effect Analysis"]
     original = effect.get("original_condition")
     patched = effect.get("patched_condition")
     removed = effect.get("vulnerability_removed")
     signature_found = effect.get("signature_found")
     if original:
-        lines.append(f"- 원래 취약 조건: {original}")
-        lines.append(f"  · 자연어 해설: {_humanize_condition(original)}")
+        lines.append(f"- Original vulnerable condition: {original}")
+        lines.append(f"  · Natural language explanation: {_humanize_condition(original)}")
     if patched:
-        lines.append(f"- 패치 후 조건: {patched}")
-        lines.append(f"  · 자연어 해설: {_humanize_condition(patched)}")
+        lines.append(f"- Post-patch condition: {patched}")
+        lines.append(f"  · Natural language explanation: {_humanize_condition(patched)}")
     if removed is not None:
-        verdict = "제거됨" if removed else "여전히 존재함"
-        lines.append(f"- 분석 결과: 취약점 {verdict}")
+        verdict = "removed" if removed else "still present"
+        lines.append(f"- Analysis result: Vulnerability {verdict}")
     if signature_found is not None:
-        signature_text = "찾음" if signature_found else "제거됨"
-        lines.append(f"- 시그니처 탐지: {signature_text}")
+        signature_text = "found" if signature_found else "removed"
+        lines.append(f"- Signature detection: {signature_text}")
     diagnostics = effect.get("diagnostics") or {}
     if diagnostics:
-        lines.append(f"- 추가 진단 정보: {diagnostics}")
+        lines.append(f"- Additional diagnostic info: {diagnostics}")
     return "\n".join(lines)
 
 

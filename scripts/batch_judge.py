@@ -96,7 +96,7 @@ def batch_evaluate(
         Number of cases updated
     """
     if verbose:
-        print(f"\n📄 Processing: {result_file}")
+        print(f"\n[FILE] Processing: {result_file}")
 
     # Find cases needing evaluation
     cases_to_eval = find_cases_needing_evaluation(result_file)
@@ -122,7 +122,7 @@ def batch_evaluate(
 
     if not prompts_data:
         if verbose:
-            print(f"   ⚠️  No valid prompts to evaluate")
+            print(f"   [WARN]  No valid prompts to evaluate")
         return 0
 
     # Batch evaluate
@@ -135,7 +135,7 @@ def batch_evaluate(
     try:
         responses = LLMClient.batch_score_explanations(prompts, max_workers=batch_size)
     except Exception as e:
-        print(f"   ❌ Batch evaluation failed: {e}")
+        print(f"   [ERROR] Batch evaluation failed: {e}")
         return 0
 
     # Parse responses and update results
@@ -172,7 +172,7 @@ def batch_evaluate(
 
         except Exception as e:
             if verbose:
-                print(f"      ⚠️  Failed to parse response for {case_id}: {e}")
+                print(f"      [WARN]  Failed to parse response for {case_id}: {e}")
             continue
 
     if updates > 0:
@@ -224,7 +224,7 @@ def batch_evaluate(
                 json.dump(data, f, indent=2)
 
         if verbose:
-            print(f"   ✅ Updated {updates} cases")
+            print(f"   [OK] Updated {updates} cases")
 
     return updates
 
@@ -276,7 +276,7 @@ def main():
 
     # Validate path
     if not args.path.exists():
-        print(f"❌ Path not found: {args.path}")
+        print(f"[ERROR] Path not found: {args.path}")
         sys.exit(1)
 
     # Find result files
@@ -286,7 +286,7 @@ def main():
         result_files = list(args.path.rglob("*_results.json"))
 
         if not result_files:
-            print(f"❌ No result files found in {args.path}")
+            print(f"[ERROR] No result files found in {args.path}")
             sys.exit(1)
 
     if not args.quiet:
@@ -311,7 +311,7 @@ def main():
             )
             total_updated += updated
         except Exception as e:
-            print(f"❌ Error processing {result_file}: {e}")
+            print(f"[ERROR] Error processing {result_file}: {e}")
             import traceback
             traceback.print_exc()
             continue
