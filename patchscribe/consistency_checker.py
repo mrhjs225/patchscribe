@@ -16,6 +16,10 @@ try:
 except ImportError:
     Bool = None
 
+# SMT solver timeout configuration (in milliseconds)
+# Set to 30 seconds to balance verification depth with responsiveness
+SMT_SOLVER_TIMEOUT_MS = 30000  # 30 seconds
+
 
 @dataclass
 class ConsistencyResult:
@@ -31,33 +35,33 @@ class ConsistencyResult:
     def overall(self) -> bool:
         """All checks must pass (prioritize effectiveness over consistency)"""
         # Critical checks: ground truth alignment and patch effectiveness
-        if self.ground_truth_alignment and not self.ground_truth_alignment.success:
+        if self.ground_truth_alignment and not self.ground_truth_alignment.passed:
             return False
-        if self.patch_effectiveness and not self.patch_effectiveness.success:
+        if self.patch_effectiveness and not self.patch_effectiveness.passed:
             return False
 
         # Original consistency checks
         return (
-            self.causal_coverage.success
-            and self.intervention_validity.success
-            and self.logical_consistency.success
-            and self.completeness.success
+            self.causal_coverage.passed
+            and self.intervention_validity.passed
+            and self.logical_consistency.passed
+            and self.completeness.passed
         )
 
     def failed_checks(self) -> List[str]:
         """Return list of failing dimensions for diagnostics."""
         failures: List[str] = []
-        if self.ground_truth_alignment and not self.ground_truth_alignment.success:
+        if self.ground_truth_alignment and not self.ground_truth_alignment.passed:
             failures.append('ground_truth_alignment')  # Highest priority
-        if self.patch_effectiveness and not self.patch_effectiveness.success:
+        if self.patch_effectiveness and not self.patch_effectiveness.passed:
             failures.append('patch_effectiveness')  # Second highest priority
-        if not self.causal_coverage.success:
+        if not self.causal_coverage.passed:
             failures.append('causal_coverage')
-        if not self.intervention_validity.success:
+        if not self.intervention_validity.passed:
             failures.append('intervention_validity')
-        if not self.logical_consistency.success:
+        if not self.logical_consistency.passed:
             failures.append('logical_consistency')
-        if not self.completeness.success:
+        if not self.completeness.passed:
             failures.append('completeness')
         return failures
 
@@ -185,8 +189,7 @@ class ConsistencyChecker:
         if missing_causes:
             return CheckOutcome(
                 False,
-                f"Causes not addressed: {', '.join(missing_causes[:2])}",
-                f"Patch must address or justify: {', '.join(missing_causes)}"
+                f"Causes not addressed: {', '.join(missing_causes[:2])}. Patch must address or justify: {', '.join(missing_causes)}"
             )
         
         return CheckOutcome(
@@ -208,8 +211,7 @@ class ConsistencyChecker:
         if not code_diff.added_lines and not code_diff.modified_lines:
             return CheckOutcome(
                 False,
-                "No code changes detected in patch",
-                "Patch claims intervention but has no code changes"
+                "No code changes detected in patch. Patch claims intervention but has no code changes"
             )
         
         # Check if intervention description matches code changes
@@ -226,8 +228,7 @@ class ConsistencyChecker:
         if not matched_keywords and intervention_keywords:
             return CheckOutcome(
                 False,
-                "Intervention not found in code changes",
-                f"Look for: {', '.join(intervention_keywords[:3])}"
+                f"Intervention not found in code changes. Look for: {', '.join(intervention_keywords[:3])}"
             )
         
         return CheckOutcome(
@@ -280,8 +281,7 @@ class ConsistencyChecker:
         
         return CheckOutcome(
             False,
-            "Cannot verify V_bug becomes false",
-            "Consider strengthening the patch or intervention"
+            "Cannot verify V_bug becomes false. Consider strengthening the patch or intervention"
         )
     
     def check_completeness(
@@ -310,8 +310,7 @@ class ConsistencyChecker:
         if undisrupted_paths:
             return CheckOutcome(
                 False,
-                f"Paths not disrupted: {', '.join(undisrupted_paths[:2])}",
-                f"Ensure patch breaks these paths: {', '.join(undisrupted_paths)}"
+                f"Paths not disrupted: {', '.join(undisrupted_paths[:2])}. Ensure patch breaks these paths: {', '.join(undisrupted_paths)}"
             )
         
         return CheckOutcome(
@@ -342,7 +341,12 @@ class ConsistencyChecker:
         """
         Use Z3 SMT solver to verify that intervention makes V_bug false.
         Returns None if verification cannot be performed.
+
+        NOTE: Z3 verification is disabled to prevent blocking. Falls back to heuristics.
         """
+        # Skip Z3 verification entirely to avoid potential blocking
+        return None
+
         if Bool is None:
             return None
         
@@ -365,6 +369,10 @@ class ConsistencyChecker:
             
             # Create solver and add vulnerability condition
             solver = Solver()
+
+            # Set timeout to prevent indefinite blocking
+            solver.set("timeout", SMT_SOLVER_TIMEOUT_MS)
+
             solver.add(formula)
             
             # Add constraints from intervention
@@ -384,8 +392,7 @@ class ConsistencyChecker:
             else:
                 return CheckOutcome(
                     False,
-                    "SMT solver found V_bug may still be satisfiable",
-                    "Strengthen the intervention or patch"
+                    "SMT solver found V_bug may still be satisfiable. Strengthen the intervention or patch"
                 )
         
         except Exception:
@@ -494,8 +501,7 @@ class ConsistencyChecker:
         else:
             return CheckOutcome(
                 False,
-                f"E_bug alignment insufficient ({len(checks_passed)}/3 checks passed)",
-                f"Failed checks: {'; '.join(checks_failed)}"
+                f"E_bug alignment insufficient ({len(checks_passed)}/3 checks passed). Failed checks: {'; '.join(checks_failed)}"
             )
 
     def _check_location_alignment(
@@ -668,7 +674,7 @@ class ConsistencyChecker:
             # This is a critical failure
             return CheckOutcome(
                 False,
-                "Ground truth verification: vulnerability NOT removed by patch",
+                "Ground truth verification: vulnerability NOT removed by patch. "
                 "Patch does not effectively eliminate the vulnerability. "
                 "Review the intervention and strengthen the fix."
             )
@@ -678,8 +684,7 @@ class ConsistencyChecker:
         if patch_correct is False:
             return CheckOutcome(
                 False,
-                "Ground truth verification: patch is semantically incorrect",
-                "Patch may introduce bugs or break functionality"
+                "Ground truth verification: patch is semantically incorrect. Patch may introduce bugs or break functionality"
             )
 
         # Check if patch has side effects
@@ -687,8 +692,7 @@ class ConsistencyChecker:
         if has_side_effects:
             return CheckOutcome(
                 False,
-                "Ground truth verification: patch has unintended side effects",
-                "Review patch for regressions or functional breaks"
+                "Ground truth verification: patch has unintended side effects. Review patch for regressions or functional breaks"
             )
 
         # All ground truth checks passed

@@ -108,7 +108,7 @@ class ResultEvaluator:
         data['evaluation_metadata'] = {
             'input_file': str(input_file),
             'evaluation_timestamp': datetime.now().isoformat(),
-            'judge': 'gpt-5-mini',
+            'judge': 'gpt-5',
             'voting_method': 'single',
             'success_evaluated': not skip_success,
             'explanation_evaluated': not skip_explanation,
@@ -357,9 +357,21 @@ class ResultEvaluator:
                 continue
 
             # Sort timestamp directories by name (YYYYMMDD-HHMMSS format sorts correctly)
-            # Latest timestamp will be last
-            timestamp_dirs.sort()
-            latest_dir = timestamp_dirs[-1]
+            # Latest timestamp will be last, so iterate in reverse to find latest with results
+            timestamp_dirs.sort(reverse=True)
+
+            # Find the latest directory that actually has result files
+            latest_dir = None
+            for dir_candidate in timestamp_dirs:
+                result_files_in_dir = list(dir_candidate.glob('*_results.json'))
+                if result_files_in_dir:
+                    latest_dir = dir_candidate
+                    break
+
+            # Skip this model if no results found in any timestamp directory
+            if not latest_dir:
+                print(f"  ⚠️  {model_dir.name}: no result files found in any timestamp directory")
+                continue
 
             # Collect all *_results.json files from the latest directory
             latest_results = list(latest_dir.glob('*_results.json'))

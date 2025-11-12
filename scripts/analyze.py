@@ -1722,7 +1722,10 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
                 continue
 
             # Find C4 results (full PatchScribe)
-            c4_file = results_dir / "c4_merged_results.json"
+            # Try evaluated results first (post-evaluation), then merged, then original
+            c4_file = results_dir / "c4_evaluated.json"
+            if not c4_file.exists():
+                c4_file = results_dir / "c4_merged_results.json"
             if not c4_file.exists():
                 c4_file = results_dir / "c4_results.json"
             if not c4_file.exists():
@@ -1753,7 +1756,10 @@ def generate_comparison_report(result_dirs: List[Path], output_dir: Path,
 
             # Collect other condition results (C1-C3)
             for condition in ['c1', 'c2', 'c3']:
-                cond_file = results_dir / f"{condition}_merged_results.json"
+                # Try evaluated results first, then merged, then original
+                cond_file = results_dir / f"{condition}_evaluated.json"
+                if not cond_file.exists():
+                    cond_file = results_dir / f"{condition}_merged_results.json"
                 if not cond_file.exists():
                     cond_file = results_dir / f"{condition}_results.json"
                 if not cond_file.exists():
@@ -2029,8 +2035,10 @@ def generate_unified_summary(base_dir: Path, output_dir: Path,
 
         # Load results for each condition
         for condition in ['c1', 'c2', 'c3', 'c4']:
-            # Try different file patterns
-            result_file = results_dir / f'{condition}_results.json'
+            # Try different file patterns (evaluated first, then merged, then original)
+            result_file = results_dir / f'{condition}_evaluated.json'
+            if not result_file.exists():
+                result_file = results_dir / f'{condition}_results.json'
             if not result_file.exists():
                 result_file = results_dir / f'{condition}_merged_results.json'
             if not result_file.exists():
@@ -3011,7 +3019,10 @@ Note:
 
                         # Find result files for requested conditions
                         for condition in conditions:
-                            result_file = results_dir / f'{condition}_results.json'
+                            # Try evaluated results first (post-evaluation), then original, then merged
+                            result_file = results_dir / f'{condition}_evaluated.json'
+                            if not result_file.exists():
+                                result_file = results_dir / f'{condition}_results.json'
                             if not result_file.exists():
                                 result_file = results_dir / f'{condition}_merged_results.json'
                             if result_file.exists():

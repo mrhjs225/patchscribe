@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
-from functools import lru_cache
 import multiprocessing as mp
 from typing import Dict, Iterable, List, Optional
 
@@ -15,8 +14,7 @@ except ImportError:
     tqdm = None
 
 from .pipeline import PatchScribePipeline, PipelineArtifacts
-from .llm import LLMConfig, LLMClient
-from .success_judge import PatchSuccessJudge
+from .llm import LLMConfig
 
 
 @dataclass
@@ -82,12 +80,8 @@ class Evaluator:
         self,
         pipeline: PatchScribePipeline | None = None,
         max_workers: int | None = None,
-        enable_judge: bool = False,
-        judge_batch_size: int = 5,
     ) -> None:
         self.pipeline = pipeline or PatchScribePipeline()
-        self.enable_judge = enable_judge
-        self.judge_batch_size = judge_batch_size
         config = LLMConfig.from_env()
 
         # Ollama는 병렬 요청을 제대로 처리하지 못하므로 항상 순차 실행
@@ -362,144 +356,9 @@ class Evaluator:
         순차 실행이 필요한 경우 max_workers=1로 설정.
         """
         if self.max_workers <= 1:
-            report = self.run_sequential(cases)
+            return self.run_sequential(cases)
         else:
-            report = self.run_parallel(cases)
-
-        # Apply judge evaluation if enabled
-        if self.enable_judge:
-            report = self._apply_judge_evaluation(report)
-
-        return report
-
-    def _apply_judge_evaluation(self, report: EvaluationReport) -> EvaluationReport:
-        """Apply LLM judge evaluation to all cases with explanations."""
-        import json
-
-        if not report.cases:
-            return report
-
-        print(f"\nRunning LLM Judge evaluation on {len(report.cases)} cases...")
-
-        # Build prompts for all cases
-        prompts = []
-        valid_indices = []
-
-        for idx, case_eval in enumerate(report.cases):
-            explanations = case_eval.explanations
-            ebug = explanations.get("E_bug")
-            epatch = explanations.get("E_patch")
-
-            # Skip if explanations are not available
-            if not ebug or not epatch:
-                continue
-
-            # Extract text from E_bug and E_patch
-            ebug_text = ebug.get("text", "") if isinstance(ebug, dict) else str(ebug)
-            epatch_text = epatch.get("text", "") if isinstance(epatch, dict) else str(epatch)
-
-            if not ebug_text or not epatch_text:
-                continue
-
-            # Get case data from iterations
-            if not case_eval.iterations:
-                continue
-
-            first_iter = case_eval.iterations[0]
-            original_code = first_iter.get("original_code", "")
-            vulnerability_sig = first_iter.get("vulnerability_signature", "")
-            patched_code = first_iter.get("patched_code", "")
-
-            if not original_code or not patched_code:
-                continue
-
-            # Build judge prompt
-            prompt = LLMClient.build_explanation_judge_prompt(
-                ebug_text=ebug_text,
-                epatch_text=epatch_text,
-                vulnerability_signature=vulnerability_sig,
-                original_code=original_code,
-                patched_code=patched_code,
-            )
-
-            prompts.append(prompt)
-            valid_indices.append(idx)
-
-        if not prompts:
-            print("  ⚠️  No valid explanations to evaluate")
-            return report
-
-        # Evaluate with gpt-5-mini
-        print(f"  Evaluating {len(prompts)} cases with gpt-5-mini judge (batch size: {self.judge_batch_size})...")
-        scores = LLMClient.batch_score_explanations(prompts, max_workers=self.judge_batch_size)
-
-        # Parse scores and update case evaluations
-        success_count = 0
-        for idx, score_text in zip(valid_indices, scores):
-            if not score_text:
-                continue
-
-            try:
-                # Parse JSON response
-                score_data = json.loads(score_text)
-
-                # Update explanation_metrics
-                case_eval = report.cases[idx]
-                if "llm_scores" not in case_eval.explanation_metrics:
-                    case_eval.explanation_metrics["llm_scores"] = {}
-
-                # Support both old and new field names
-                # New format: vulnerability_understanding, patch_understanding, causal_connection, actionability
-                # Old format: accuracy, completeness, clarity, causality
-                has_new_format = any(k in score_data for k in [
-                    'vulnerability_understanding',
-                    'patch_understanding',
-                    'causal_connection',
-                    'actionability'
-                ])
-
-                if has_new_format:
-                    # Collect reasoning from individual fields
-                    reasoning_parts = []
-                    for field in ['vulnerability_understanding_reasoning', 'patch_understanding_reasoning',
-                                 'causal_connection_reasoning', 'actionability_reasoning']:
-                        if field in score_data and score_data[field]:
-                            dimension = field.replace('_reasoning', '').replace('_', ' ').title()
-                            reasoning_parts.append(f"{dimension}: {score_data[field]}")
-                    reasoning = "\n".join(reasoning_parts) if reasoning_parts else score_data.get("reasoning", "")
-
-                    case_eval.explanation_metrics["llm_scores"].update({
-                        "vulnerability_understanding": float(score_data.get("vulnerability_understanding", 0)),
-                        "patch_understanding": float(score_data.get("patch_understanding", 0)),
-                        "causal_connection": float(score_data.get("causal_connection", 0)),
-                        "actionability": float(score_data.get("actionability", 0)),
-                        "reasoning": reasoning,
-                        # Backward compatibility: map to old names
-                        "accuracy": float(score_data.get("vulnerability_understanding", 0)),
-                        "completeness": float(score_data.get("patch_understanding", 0)),
-                        "clarity": float(score_data.get("causal_connection", 0)),
-                        "causality": float(score_data.get("actionability", 0)),
-                    })
-                else:
-                    # Old format
-                    case_eval.explanation_metrics["llm_scores"].update({
-                        "accuracy": float(score_data.get("accuracy", 0)),
-                        "completeness": float(score_data.get("completeness", 0)),
-                        "clarity": float(score_data.get("clarity", 0)),
-                        "causality": float(score_data.get("causality", 0)),
-                        "reasoning": score_data.get("reasoning", ""),
-                    })
-                success_count += 1
-            except (json.JSONDecodeError, ValueError, KeyError) as e:
-                print(f"  ⚠️  Failed to parse judge response for case {case_eval.case_id}: {e}")
-                continue
-
-        print(f"  ✅ Successfully evaluated {success_count}/{len(prompts)} cases")
-
-        # Recalculate metrics
-        report.metrics = self._compute_metrics(report.cases)
-
-        return report
+            return self.run_parallel(cases)
 
 
 
@@ -538,12 +397,6 @@ def _normalize_code(code: str | None) -> str:
     return "\n".join(line.rstrip() for line in code.strip().splitlines())
 
 
-@lru_cache(maxsize=1)
-def _get_patch_success_judge() -> PatchSuccessJudge:
-    """Instantiate a PatchSuccessJudge per process (always uses gpt-5-mini)."""
-    return PatchSuccessJudge()
-
-
 def _evaluate_case_wrapper(
     case: Dict[str, object],
     case_number: int,
@@ -553,25 +406,16 @@ def _evaluate_case_wrapper(
     병렬 실행을 위한 wrapper 함수.
     ProcessPoolExecutor는 인스턴스 메서드를 직접 호출할 수 없으므로
     모듈 레벨 함수가 필요함.
+
+    Note: Success judgment is NOT performed here - it will be done by evaluate_results.py
     """
     artifacts = pipeline.run(case)
-    judge = _get_patch_success_judge()
+
+    # Success judgment is deferred to evaluate_results.py
+    # Here we only check ground truth match
     generated_patch = artifacts.patch.patched_code or ""
-    explanation_bundle = artifacts.explanations
-    description_hint = (
-        explanation_bundle.natural_llm
-        or explanation_bundle.natural_template
-        or explanation_bundle.formal_summary
-        or None
-    )
-    success_verdict = judge.evaluate(
-        original_code=case.get("source", ""),
-        patched_code=generated_patch,
-        ground_truth=case.get("ground_truth"),
-        vulnerability_signature=case.get("signature"),
-        description=description_hint,
-    )
-    actual_success = success_verdict.is_success
+    actual_success = _compare_ground_truth(generated_patch, case.get("ground_truth")) or False
+
     expected = case.get("expected_success", False)
     case_identifier = (
         case.get("id")
@@ -653,5 +497,5 @@ def _evaluate_case_wrapper(
         performance=artifacts.performance.as_dict() if artifacts.performance else None,
         patch_quality=artifacts.patch_quality,
         ast_similarity=ast_similarity_info,
-        success_judgment=success_verdict.as_dict(),
+        success_judgment=None,  # Will be populated by evaluate_results.py
     )

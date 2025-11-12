@@ -33,15 +33,15 @@ DEFAULT_VLLM_ENDPOINT = "http://115.145.135.227:7220/v1/chat/completions"
 DEFAULT_VLLM_MODEL = "openai/gpt-oss-120b"
 DEFAULT_ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5"
-DEFAULT_ANTHROPIC_VERSION = "2023-06-01"
+DEFAULT_ANTHROPIC_VERSION = "2025-10-01"
 DEFAULT_LLM_MAX_TOKENS = 8192
 DEFAULT_GEMINI_ENDPOINT_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
-DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 
 # Judge model configuration (single judge: gpt-5-mini)
-DEFAULT_JUDGE_MODEL = "gpt-5-mini"
+DEFAULT_JUDGE_MODEL = "gpt-5"
 DEFAULT_OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 DEFAULT_OPENAI_COMPLETION_MODEL = DEFAULT_JUDGE_MODEL
 
@@ -202,8 +202,8 @@ class LLMClient:
         # Configure connection pooling
         if HTTPAdapter is not None:
             adapter = HTTPAdapter(
-                pool_connections=10,  # Number of connection pools to cache
-                pool_maxsize=20,  # Maximum connections to save in pool
+                pool_connections=50,  # Number of connection pools to cache (increased from 10)
+                pool_maxsize=500,  # Maximum connections to save in pool (increased from 20)
                 max_retries=retry_strategy,
             )
             session.mount("http://", adapter)

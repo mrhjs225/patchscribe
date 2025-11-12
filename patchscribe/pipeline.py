@@ -237,9 +237,9 @@ class PatchScribePipeline:
 
             # Consistency feedback
             if consistency and not consistency.overall:
-                if not consistency.causal_coverage.success:
+                if not consistency.causal_coverage.passed:
                     feedback_parts.append(consistency.causal_coverage.feedback)
-                if not consistency.completeness.success:
+                if not consistency.completeness.passed:
                     feedback_parts.append(consistency.completeness.feedback)
 
             feedback = " ".join(feedback_parts)
