@@ -17,7 +17,7 @@ PatchScribe 통합 실험 스크립트
 
     # 특정 모델과 조건만
     python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
-        --models ollama:llama3.2:1b ollama:llama3.2:3b \
+        --llm-provider openai --models gpt-5-mini \
         --conditions c4
 """
 import json
@@ -35,34 +35,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from patchscribe.llm import (
     DEFAULT_GEMINI_ENDPOINT_TEMPLATE,
     DEFAULT_GEMINI_MODEL as LLM_DEFAULT_GEMINI_MODEL,
-    DEFAULT_OLLAMA_ENDPOINT,
     DEFAULT_OPENAI_ENDPOINT,
     PromptOptions,
 )
-
-
-# 전체 실험 대상 모델 리스트 (16개)
-DEFAULT_MODELS = [
-    "qwen3:14b",
-    "qwen3:8b",
-    "qwen3:4b",
-    "qwen3:1.7b",
-    "gemma3:12b",
-    "gemma3:4b",
-    "gemma3:270m",
-    "deepseek-r1:14b",
-    "deepseek-r1:8b",
-    "deepseek-r1:7b",
-    "llama3.2:3b",
-    "llama3.2:1b",
-    "gpt-oss:20b",
-    "gemma3:1b",
-    "deepseek-r1:1.5b",
-    "qwen3:0.6b",
-]
-
-DEFAULT_VLLM_MODEL = "openai/gpt-oss-120b"
-DEFAULT_VLLM_ENDPOINT = "http://115.145.135.227:7220/v1/chat/completions"
 OPENAI_MODELS = [
     "gpt-5-mini",
     "gpt-4.1-mini",
@@ -105,18 +80,15 @@ AUTO_PROVIDER_MAX_TOKENS = {
 
 def select_default_models(provider: str, *, quick: bool = False) -> List[str]:
     """Return provider-aware default model list."""
-    provider = (provider or "ollama").lower()
-    if provider == 'ollama':
-        return [DEFAULT_MODELS[0]] if quick else list(DEFAULT_MODELS)
-    if provider == 'vllm':
-        return [DEFAULT_VLLM_MODEL]
+    provider = (provider or "openai").lower()
     if provider == 'openai':
         return [DEFAULT_OPENAI_MODEL] if quick else list(OPENAI_MODELS)
     if provider == 'anthropic':
         return [DEFAULT_ANTHROPIC_MODEL] if quick else list(ANTHROPIC_MODELS)
     if provider == 'gemini':
         return [DEFAULT_GEMINI_MODEL] if quick else list(GEMINI_MODELS)
-    return [DEFAULT_MODELS[0]] if quick else list(DEFAULT_MODELS)
+    # Default to OpenAI
+    return [DEFAULT_OPENAI_MODEL] if quick else list(OPENAI_MODELS)
 
 
 def parse_prompt_components_arg(raw: str | None) -> PromptOptions:
@@ -146,7 +118,7 @@ def parse_prompt_components_arg(raw: str | None) -> PromptOptions:
 
 def print_llm_settings(llm_config: Dict[str, object]) -> None:
     """Pretty-print LLM runtime settings."""
-    provider = llm_config.get('provider', 'ollama')
+    provider = llm_config.get('provider', 'openai')
     endpoint = llm_config.get('endpoint') or 'N/A'
     timeout = llm_config.get('timeout')
     max_tokens = llm_config.get('max_tokens')
@@ -432,14 +404,11 @@ def get_condition_settings(condition: str) -> Tuple[str, bool]:
 
 def _supports_parallel_conditions(model_spec: str, llm_config: Dict[str, object]) -> bool:
     """특정 모델이 조건 병렬 실행을 안전하게 지원하는지 여부."""
-    provider = (llm_config.get('provider') or 'ollama').lower()
-    if provider in {'ollama', 'vllm'}:
-        return False
+    provider = (llm_config.get('provider') or 'openai').lower()
     concurrency = llm_config.get('concurrency')
     if not concurrency or concurrency <= 1:
         return False
-    model_name = model_spec.split(':', 1)[1] if model_spec.startswith('ollama:') else model_spec
-    model_basename = model_name.split('/')[-1] if model_name else model_name
+    model_basename = model_spec.split('/')[-1] if model_spec else model_spec
     allowed = CONCURRENCY_ALLOWED_MODELS.get(provider, set())
     return model_basename in allowed
 
@@ -468,16 +437,9 @@ def run_single_evaluation(
     from patchscribe.evaluation import Evaluator
 
     # 모델 스펙 파싱
-    # 형식: "qwen3:14b" 또는 "ollama:qwen3:14b"
-    # 기본 provider는 항상 ollama
-    if model_spec.startswith('ollama:'):
-        # "ollama:qwen3:14b" -> "qwen3:14b"
-        model_name = model_spec[7:]  # "ollama:" 제거
-    else:
-        # "qwen3:14b" -> "qwen3:14b"
-        model_name = model_spec
+    model_name = model_spec
 
-    provider = (llm_config.get('provider') or 'ollama').lower()
+    provider = (llm_config.get('provider') or 'openai').lower()
     endpoint = llm_config.get('endpoint')
     timeout = llm_config.get('timeout')
     max_tokens = llm_config.get('max_tokens')
@@ -516,11 +478,7 @@ def run_single_evaluation(
 
     # concurrency는 지원되는 모델에서만 사용
     evaluator_kwargs: Dict[str, object] = {}
-    if provider in {'ollama', 'vllm'}:
-        evaluator_kwargs['max_workers'] = 1
-        if concurrency and verbose:
-            print("    ⚠️ LLM concurrency is not supported for this provider; running sequentially.")
-    elif concurrency and concurrency_allowed:
+    if concurrency and concurrency_allowed:
         evaluator_kwargs['max_workers'] = max(1, int(concurrency))
     else:
         evaluator_kwargs['max_workers'] = 1
@@ -1087,9 +1045,9 @@ def main():
     # LLM configuration
     parser.add_argument(
         '--llm-provider',
-        choices=['ollama', 'vllm', 'openai', 'anthropic', 'gemini'],
-        default='ollama',
-        help='패치 생성을 위한 LLM 제공자 선택 (기본값: ollama)'
+        choices=['openai', 'anthropic', 'gemini'],
+        default='openai',
+        help='패치 생성을 위한 LLM 제공자 선택 (기본값: openai)'
     )
     parser.add_argument(
         '--llm-endpoint',
@@ -1171,11 +1129,7 @@ def main():
     llm_config['prompt_options'] = prompt_options
 
     if not llm_config['endpoint']:
-        if args.llm_provider == 'ollama':
-            llm_config['endpoint'] = DEFAULT_OLLAMA_ENDPOINT
-        elif args.llm_provider == 'vllm':
-            llm_config['endpoint'] = DEFAULT_VLLM_ENDPOINT
-        elif args.llm_provider == 'openai':
+        if args.llm_provider == 'openai':
             llm_config['endpoint'] = DEFAULT_OPENAI_ENDPOINT
         elif args.llm_provider == 'anthropic':
             llm_config['endpoint'] = DEFAULT_ANTHROPIC_ENDPOINT

@@ -82,25 +82,7 @@ class Evaluator:
         max_workers: int | None = None,
     ) -> None:
         self.pipeline = pipeline or PatchScribePipeline()
-        config = LLMConfig.from_env()
-
-        # Ollama는 병렬 요청을 제대로 처리하지 못하므로 항상 순차 실행
-        # endpoint에 localhost나 127.0.0.1이 포함되어 있으면 로컬 Ollama로 간주
-        is_local_ollama = (
-            config.provider == "ollama" and
-            config.endpoint and
-            ("localhost" in config.endpoint or "127.0.0.1" in config.endpoint)
-        )
-
-        if is_local_ollama:
-            if max_workers and max_workers != 1:
-                print(
-                    "Warning: Local Ollama detected; forcing sequential evaluation "
-                    "to avoid parallel requests that cause timeouts."
-                )
-            self.max_workers = 1
-        else:
-            self.max_workers = max_workers or mp.cpu_count()
+        self.max_workers = max_workers or mp.cpu_count()
 
     def _compute_metrics(self, evaluations: List[CaseEvaluation]) -> Dict[str, float]:
         """평가 결과 리스트로부터 메트릭을 계산"""

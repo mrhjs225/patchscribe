@@ -26,11 +26,6 @@ class LLMUnavailable(RuntimeError):
     """Raised when an LLM call is requested but configuration is missing."""
 
 
-DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434/api/chat"
-DEFAULT_OLLAMA_MODEL = "llama3.2:1b"
-
-DEFAULT_VLLM_ENDPOINT = "http://115.145.135.227:7220/v1/chat/completions"
-DEFAULT_VLLM_MODEL = "openai/gpt-oss-120b"
 DEFAULT_ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5"
 DEFAULT_ANTHROPIC_VERSION = "2025-10-01"
@@ -48,7 +43,7 @@ DEFAULT_OPENAI_COMPLETION_MODEL = DEFAULT_JUDGE_MODEL
 
 @dataclass
 class LLMConfig:
-    provider: str = "ollama"
+    provider: str = "openai"
     endpoint: str | None = None
     api_key: str | None = None
     model: str | None = None
@@ -57,11 +52,7 @@ class LLMConfig:
 
     def __post_init__(self) -> None:
         if not self.model:
-            if self.provider == "ollama":
-                self.model = DEFAULT_OLLAMA_MODEL
-            elif self.provider == "vllm":
-                self.model = DEFAULT_VLLM_MODEL
-            elif self.provider == "openai":
+            if self.provider == "openai":
                 self.model = DEFAULT_OPENAI_COMPLETION_MODEL
             elif self.provider == "anthropic":
                 self.model = DEFAULT_ANTHROPIC_MODEL
@@ -69,12 +60,8 @@ class LLMConfig:
                 self.model = DEFAULT_GEMINI_MODEL
 
         if not self.endpoint:
-            if self.provider == "ollama":
-                self.endpoint = DEFAULT_OLLAMA_ENDPOINT
-            elif self.provider == "openai":
+            if self.provider == "openai":
                 self.endpoint = DEFAULT_OPENAI_ENDPOINT
-            elif self.provider == "vllm":
-                self.endpoint = DEFAULT_VLLM_ENDPOINT
             elif self.provider == "anthropic":
                 self.endpoint = DEFAULT_ANTHROPIC_ENDPOINT
             elif self.provider == "gemini":
@@ -105,20 +92,14 @@ class LLMConfig:
                 max_tokens=None,
             )
 
-        provider = (os.environ.get("PATCHSCRIBE_LLM_PROVIDER") or "ollama").lower()
+        provider = (os.environ.get("PATCHSCRIBE_LLM_PROVIDER") or "openai").lower()
         endpoint = os.environ.get("PATCHSCRIBE_LLM_ENDPOINT")
         model = os.environ.get("PATCHSCRIBE_LLM_MODEL")
         timeout = int(os.environ.get("PATCHSCRIBE_LLM_TIMEOUT", "300"))
         max_tokens_env = os.environ.get("PATCHSCRIBE_LLM_MAX_TOKENS")
         max_tokens = int(max_tokens_env) if max_tokens_env else None
 
-        if provider == "ollama":
-            model = model or DEFAULT_OLLAMA_MODEL
-            api_key = os.environ.get("PATCHSCRIBE_LLM_API_KEY")
-        elif provider == "vllm":
-            model = model or DEFAULT_VLLM_MODEL
-            api_key = os.environ.get("PATCHSCRIBE_LLM_API_KEY")
-        elif provider == "openai":
+        if provider == "openai":
             model = model or DEFAULT_OPENAI_COMPLETION_MODEL
             api_key = os.environ.get("OPENAI_API_KEY")
             if max_tokens is None:
@@ -144,9 +125,10 @@ class LLMConfig:
                 if gemini_max_env and gemini_max_env.lower() != "none":
                     max_tokens = int(gemini_max_env)
         else:
-            provider = "ollama"
-            model = model or DEFAULT_OLLAMA_MODEL
-            api_key = os.environ.get("PATCHSCRIBE_LLM_API_KEY")
+            # Default to OpenAI for unknown providers
+            provider = "openai"
+            model = model or DEFAULT_OPENAI_COMPLETION_MODEL
+            api_key = os.environ.get("OPENAI_API_KEY")
 
         return cls(
             provider=provider,
@@ -171,12 +153,8 @@ class PromptOptions:
 class LLMClient:
     """Thin HTTP client for chat-style completion APIs used in the PoC."""
 
-    _OLLAMA_MODEL_CACHE: Dict[tuple[str | None, str], str] = {}
-
     def __init__(self, config: LLMConfig | None = None) -> None:
         self.config = config or LLMConfig.from_env()
-        if self.config.provider == "ollama":
-            self.config.model = self._normalize_ollama_model(self.config.model)
 
         # Initialize session with connection pooling
         self._session = self._create_session() if requests is not None else None
@@ -254,7 +232,7 @@ class LLMClient:
             headers.setdefault("x-goog-api-client", "patchscribe/llm")
             return headers
 
-        if self.config.api_key and provider != "ollama":
+        if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
         return headers
 
@@ -475,51 +453,6 @@ class LLMClient:
             raise LLMUnavailable("LLM response missing content")
         return content
 
-    def _normalize_ollama_model(self, model: str) -> str:
-        if not model or requests is None:
-            return model
-        tags_url = self._ollama_tags_url()
-        if not tags_url:
-            return model
-        target = model.lower()
-        cache_key = (tags_url, target)
-        cached = self._OLLAMA_MODEL_CACHE.get(cache_key)
-        if cached is not None:
-            return cached
-
-        # Use session if available, otherwise fall back to requests module
-        http_client = self._session if hasattr(self, '_session') and self._session is not None else requests
-
-        normalized = model
-        try:
-            response = http_client.get(tags_url, timeout=min(self.config.timeout, 10))
-            response.raise_for_status()
-            data = response.json()
-        except Exception:
-            self._OLLAMA_MODEL_CACHE[cache_key] = normalized
-            return normalized
-        models = data.get("models") or []
-        found = False
-        for item in models:
-            if not isinstance(item, dict):
-                continue
-            for key in ("name", "model"):
-                candidate = item.get(key)
-                if isinstance(candidate, str) and candidate.lower() == target:
-                    normalized = candidate
-                    found = True
-                    break
-            if found:
-                break
-        self._OLLAMA_MODEL_CACHE[cache_key] = normalized
-        return normalized
-
-    def _ollama_tags_url(self) -> Optional[str]:
-        if not self.config.endpoint:
-            return None
-        base = self.config.endpoint.rstrip("/") + "/"
-        return urljoin(base, "../tags")
-
     @staticmethod
     def _coerce_message_text(content: object) -> str:
         if content is None:
@@ -547,14 +480,7 @@ class LLMClient:
     def _build_payload(self, messages: List[Dict[str, str]], *, temperature: float) -> Dict[str, object]:
         provider = self.config.provider
 
-        if provider == "ollama":
-            payload: Dict[str, object] = {
-                "model": self.config.model,
-                "messages": messages,
-                "stream": False,
-                "options": {"temperature": temperature},
-            }
-        elif provider == "anthropic":
+        if provider == "anthropic":
             system_prompt: Optional[str] = None
             converted: List[Dict[str, object]] = []
 
@@ -649,13 +575,6 @@ class LLMClient:
         return payload
 
     def _extract_content(self, data: Dict[str, object]) -> Optional[str]:
-        if self.config.provider == "ollama":
-            message = data.get("message") or {}
-            if isinstance(message, dict):
-                content = message.get("content")
-                if isinstance(content, str):
-                    return content
-            return None
         if self.config.provider == "anthropic":
             content = data.get("content")
             if isinstance(content, list):

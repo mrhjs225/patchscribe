@@ -14,21 +14,19 @@ PatchScribe는 형식적 인과 이론(formal causality theory)을 활용하여 
 # Python 3.8 이상 필요
 python3 --version
 
-# Ollama 시작 (로컬 LLM 서버)
-ollama serve  # 별도 터미널에서
-
-# 실험 대상 모델 다운로드 (16개 중 필요한 것만)
-ollama pull qwen3:14b
-ollama pull gemma3:12b
-ollama pull deepseek-r1:7b
-# ... 필요한 모델 추가
-
-# OpenAI API 키 설정 (GPT Judge 평가용)
-export OPENAI_API_KEY=sk-...
+# API 키 설정
+export OPENAI_API_KEY=sk-...        # OpenAI 사용 시
+export ANTHROPIC_API_KEY=sk-...    # Anthropic 사용 시
+export GEMINI_API_KEY=...          # Gemini 사용 시
 ```
 
+**지원되는 LLM Provider**:
+- OpenAI (GPT-4, GPT-5 등)
+- Anthropic (Claude)
+- Google Gemini
+
 **주의**: 환경 변수 `PATCHSCRIBE_LLM_*` 설정은 **불필요**합니다.
-모델은 `--models` 옵션으로 지정하며, 실험 스크립트가 자동으로 설정합니다.
+Provider와 모델은 `--llm-provider`와 `--models` 옵션으로 지정합니다.
 
 ### 2️⃣ 실험 실행
 
@@ -39,14 +37,14 @@ PatchScribe는 **2개의 핵심 스크립트**로 모든 실험을 수행합니�
 모든 실험 워크플로우를 단일 스크립트로 실행합니다.
 
 ```bash
-# 빠른 테스트 (3개 케이스)
-python3 scripts/run_experiment.py --quick
+# 빠른 테스트 (3개 케이스, OpenAI 사용)
+python3 scripts/run_experiment.py --quick --llm-provider openai
 
-# 로컬 실험 (10개 케이스)
-python3 scripts/run_experiment.py --dataset zeroday --limit 10
+# 로컬 실험 (10개 케이스, Claude 사용)
+python3 scripts/run_experiment.py --dataset zeroday --limit 10 --llm-provider anthropic
 
-# 분산 실험 (Server 0, 4대 서버 중)
-python3 scripts/run_experiment.py --distributed 0 4 20 --dataset zeroday
+# 분산 실험 (Server 0, 4대 서버 중, Gemini 사용)
+python3 scripts/run_experiment.py --distributed 0 4 20 --dataset zeroday --llm-provider gemini
 
 # Stage-1 캐시만 미리 생성 (LLM 호출 전 준비)
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 --precompute-stage1
@@ -91,8 +89,8 @@ python3 scripts/analyze.py --compare results/model1 results/model2
 ### 로컬 환경에서 전체 파이프라인
 
 ```bash
-# 1. 실험 실행 (10개 케이스)
-python3 scripts/run_experiment.py --dataset zeroday --limit 10
+# 1. 실험 실행 (10개 케이스, OpenAI 사용)
+python3 scripts/run_experiment.py --dataset zeroday --limit 10 --llm-provider openai
 
 # 2. 결과 분석
 python3 scripts/analyze.py results/local
@@ -220,39 +218,34 @@ patchscribe/
 # 빠른 테스트 (3개 케이스)
 python3 scripts/run_experiment.py --quick
 
-# 전체 모델 실험 (16개 모델)
-python3 scripts/run_experiment.py --dataset zeroday --limit 10
-
-# 특정 모델만
+# 특정 모델 + 조건 (OpenAI)
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
-    --models qwen3:14b gemma3:12b
+    --llm-provider openai --models gpt-5-mini --conditions c4
 
-# 특정 모델 + 조건
+# 특정 모델 + 조건 (Anthropic)
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
-    --models llama3.2:1b --conditions c4
+    --llm-provider anthropic --models claude-haiku-4-5 --conditions c4
 
 # 일관성 체크 비활성화 (C1, C2 조건에서는 자동 비활성화됨)
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
     --conditions c1 c2 --disable-consistency-check
 ```
 
-**전체 실험 대상 모델 (16개)**:
-- `qwen3:14b`, `qwen3:8b`, `qwen3:4b`, `qwen3:1.7b`, `qwen3:0.6b`
-- `gemma3:12b`, `gemma3:4b`, `gemma3:1b`, `gemma3:270m`
-- `deepseek-r1:14b`, `deepseek-r1:8b`, `deepseek-r1:7b`, `deepseek-r1:1.5b`
-- `llama3.2:3b`, `llama3.2:1b`
-- `gpt-oss:20b`
+**지원되는 모델**:
+- **OpenAI**: `gpt-5-mini`, `gpt-4.1-mini`
+- **Anthropic**: `claude-3-5-haiku`, `claude-haiku-4-5`
+- **Gemini**: `gemini-2.5-flash`, `gemini-2.0-flash`
 
 ### 분석
 ```bash
 # 로컬 결과 분석
 python3 scripts/analyze.py results/local
 
-# 특정 모델만 분석 (gpt-oss-20b, qwen3-4b)
-python3 scripts/analyze.py results/local --models gpt-oss-20b qwen3-4b
+# 특정 모델만 분석
+python3 scripts/analyze.py results/local --models gpt-5-mini claude-haiku-4-5
 
 # 분산 결과 병합 + 분석 (특정 모델만)
-python3 scripts/analyze.py --merge results/server* --models qwen3-4b deepseek-r1-7b
+python3 scripts/analyze.py --merge results/server* --models gpt-5-mini claude-haiku-4-5
 
 # 모델 비교
 python3 scripts/analyze.py --compare results/model1 results/model2
@@ -297,7 +290,7 @@ python3 scripts/run_experiment.py --dataset zeroday --limit 10
 
 # 특정 모델만 실행
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
-    --models llama3.2:3b qwen3:4b
+    --models gpt-5-mini claude-haiku-4-5
 
 # 특정 조건만 실행
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
@@ -305,7 +298,7 @@ python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
 
 # 조합 예시: 특정 모델 + 특정 조건
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
-    --models llama3.2:3b \
+    --models claude-haiku-4-5 \
     --conditions c3 c4
 ```
 
@@ -377,22 +370,16 @@ python3 scripts/run_experiment.py --dataset zeroday --offset 10 --limit 20
 ```bash
 # 모델 선택
 --models MODEL [MODEL ...]
-  실험할 모델 리스트 (기본값: 16개 모델 전체)
+  실험할 모델 리스트
 
-  전체 실험 대상 모델 (16개):
-  - qwen3:14b, qwen3:8b, qwen3:4b, qwen3:1.7b, qwen3:0.6b
-  - gemma3:12b, gemma3:4b, gemma3:1b, gemma3:270m
-  - deepseek-r1:14b, deepseek-r1:8b, deepseek-r1:7b, deepseek-r1:1.5b
-  - llama3.2:3b, llama3.2:1b
-  - gpt-oss:20b
-
-  모델 이름 형식:
-  - 기본: qwen3:14b, gemma3:12b, deepseek-r1:7b
-  - provider(ollama)는 자동 설정됨
+  지원되는 모델:
+  - OpenAI: gpt-5-mini, gpt-4.1-mini
+  - Anthropic: claude-3-5-haiku, claude-haiku-4-5
+  - Gemini: gemini-2.5-flash, gemini-2.0-flash
 
   예시:
-  --models qwen3:14b gemma3:12b
-  --models llama3.2:3b deepseek-r1:7b
+  --models gpt-5-mini gpt-4.1-mini
+  --models claude-haiku-4-5
 
 # 조건 선택
 --conditions {c1,c2,c3,c4} [...]
@@ -418,7 +405,7 @@ python3 scripts/run_experiment.py --dataset zeroday --offset 10 --limit 20
 ```bash
 # C4만, 특정 모델 2개
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
-    --models qwen3:14b gemma3:12b \
+    --models gpt-5-mini gpt-4.1-mini \
     --conditions c4
 
 # Ablation study: C1-C4 전체, 16개 모델 전체
@@ -427,7 +414,7 @@ python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
 
 # 소형 모델만 테스트
 python3 scripts/run_experiment.py --dataset zeroday --limit 10 \
-    --models qwen3:1.7b gemma3:1b llama3.2:1b \
+    --models gpt-5-mini claude-3-5-haiku gemini-2.0-flash \
     --conditions c4
 
 # RQ2 제외, C4만
@@ -489,7 +476,7 @@ python3 scripts/run_experiment.py --dataset zeroday --limit 50 \
 
 # 3. 특정 모델 벤치마크
 python3 scripts/run_experiment.py --dataset zeroday --limit 20 \
-    --models llama3.2:3b qwen3:4b deepseek-r1:7b \
+    --models gpt-5-mini claude-haiku-4-5 gemini-2.5-flash \
     --conditions c4
 
 # 4. 분산 실험 (4대 서버, 100개 케이스)
@@ -501,7 +488,7 @@ python3 scripts/run_experiment.py --distributed 3 4 100 --dataset zeroday
 
 # 5. Ablation study (C1→C4 성능 비교)
 python3 scripts/run_experiment.py --dataset zeroday --limit 30 \
-    --models qwen3:4b \
+    --models gpt-5-mini \
     --conditions c1 c2 c3 c4
 
 # 6. 조용한 백그라운드 실행
@@ -525,7 +512,7 @@ python3 scripts/analyze.py [경로...] [옵션]
 
 ```bash
 # 특정 결과 파일 분석
-python3 scripts/analyze.py results/local/qwen3-4b/c4_results.json
+python3 scripts/analyze.py results/local/gpt-5-mini/c4_results.json
 ```
 
 **출력**:
@@ -551,11 +538,11 @@ python3 scripts/analyze.py results/local --all-conditions
 **출력**:
 ```
 results/local/
-├── qwen3-4b/
+├── gpt-5-mini/
 │   ├── c4_results.json
 │   ├── c4_results_analysis.json    # ← 생성됨
 │   └── c4_results_summary.md       # ← 생성됨
-├── llama3.2-3b/
+├── claude-haiku-4-5/
 │   ├── c4_results_analysis.json
 │   └── c4_results_summary.md
 └── comparison/                      # ← 자동 생성 (모델이 2개 이상일 때)
@@ -586,7 +573,7 @@ python3 scripts/analyze.py --merge results/server0 results/server1
 **출력**:
 ```
 results/merged/
-├── qwen3-4b/
+├── gpt-5-mini/
 │   ├── c4_merged.json              # ← 병합된 결과
 │   ├── c4_merged_analysis.json     # ← 분석
 │   └── c4_merged_summary.md
@@ -630,7 +617,7 @@ python3 scripts/analyze.py --compare results/model1 results/model2 results/model
   분석할 모델 필터링
 
   예시:
-  --models qwen3-4b deepseek-r1-7b
+  --models gpt-5-mini gemini-2.5-flash
 
   사용 시나리오:
   - 여러 모델 결과가 있지만 일부만 분석하고 싶을 때
@@ -648,16 +635,16 @@ python3 scripts/analyze.py --compare results/model1 results/model2 results/model
 
 **필터 예시**:
 ```bash
-# qwen3-4b와 deepseek-r1-7b만 분석
-python3 scripts/analyze.py results/local --models qwen3-4b deepseek-r1-7b
+# gpt-5-mini와 gemini-2.5-flash만 분석
+python3 scripts/analyze.py results/local --models gpt-5-mini gemini-2.5-flash
 
 # 모든 조건 분석하되 특정 모델만
 python3 scripts/analyze.py results/local --all-conditions \
-    --models qwen3-4b
+    --models gpt-5-mini
 
 # 병합 시 특정 모델만
 python3 scripts/analyze.py --merge results/server* \
-    --models llama3.2-3b qwen3-4b
+    --models claude-haiku-4-5 gpt-5-mini
 ```
 
 ---
@@ -685,7 +672,7 @@ python3 scripts/analyze.py --merge results/server* \
 
 ```bash
 # 1. 단일 파일 분석
-python3 scripts/analyze.py results/local/qwen3-4b/c4_results.json
+python3 scripts/analyze.py results/local/gpt-5-mini/c4_results.json
 
 # 2. 디렉토리 전체 분석 (C4만)
 python3 scripts/analyze.py results/local
@@ -697,17 +684,17 @@ python3 scripts/analyze.py results/local --all-conditions
 python3 scripts/analyze.py --merge results/server*
 
 # 5. 특정 모델만 분석
-python3 scripts/analyze.py results/local --models qwen3-4b deepseek-r1-7b
+python3 scripts/analyze.py results/local --models gpt-5-mini gemini-2.5-flash
 
 # 6. 특정 모델 비교
 python3 scripts/analyze.py --compare \
-    results/local/qwen3-4b \
-    results/local/llama3.2-3b
+    results/local/gpt-5-mini \
+    results/local/claude-haiku-4-5
 
 # 7. 병합 + 모든 조건 + 특정 모델
 python3 scripts/analyze.py --merge results/server* \
     --all-conditions \
-    --models qwen3-4b
+    --models gpt-5-mini
 
 # 8. 조용한 분석 (자동화용)
 python3 scripts/analyze.py results/local --quiet > analysis.log 2>&1
@@ -740,10 +727,10 @@ GPT Judge 평가는 기본적으로 **자동 실행**되지만, 다음 경우 �
 
 ```bash
 # 1. 단일 결과 파일 배치 평가
-python3 scripts/batch_judge.py results/local/qwen3-4b/c4_results.json
+python3 scripts/batch_judge.py results/local/gpt-5-mini/c4_results.json
 
 # 2. 디렉토리 내 모든 결과 파일 배치 평가
-python3 scripts/batch_judge.py results/local/qwen3-4b/
+python3 scripts/batch_judge.py results/local/gpt-5-mini/
 
 # 3. 배치 크기 조정 (동시 요청 10개)
 python3 scripts/batch_judge.py results/local/ --batch-size 10
@@ -823,7 +810,7 @@ python3 scripts/batch_judge.py results/local/ --quiet
 python3 scripts/batch_judge.py results/local/ --dry-run
 
 # 출력 예시:
-# 📄 Processing: results/local/qwen3-4b/c4_results.json
+# 📄 Processing: results/local/gpt-5-mini/c4_results.json
 #    Found 15 cases needing evaluation
 #       - case_001
 #       - case_002
@@ -833,7 +820,7 @@ python3 scripts/batch_judge.py results/local/ --dry-run
 python3 scripts/batch_judge.py results/local/ --batch-size 10
 
 # 출력 예시:
-# 📄 Processing: results/local/qwen3-4b/c4_results.json
+# 📄 Processing: results/local/gpt-5-mini/c4_results.json
 #    Found 15 cases needing evaluation
 #    Building evaluation prompts...
 #    Evaluating 15 cases (batch_size=10)...
@@ -881,7 +868,7 @@ export PATCHSCRIBE_JUDGE_TIMEOUT=180
 ```bash
 # 1. 실험 실행 (자동으로 GPT Judge 평가 포함)
 python3 scripts/run_experiment.py --dataset zeroday --limit 20 \
-    --models qwen3:4b deepseek-r1:7b \
+    --models gpt-5-mini gemini-2.5-flash \
     --conditions c4
 
 # 2. (옵션) 평가 실패 케이스 재시도 (배치 모드)
@@ -892,8 +879,8 @@ python3 scripts/analyze.py results/local/
 
 # 4. 모델 비교 리포트 생성
 python3 scripts/analyze.py --compare \
-    results/local/qwen3-4b \
-    results/local/deepseek-r1-7b
+    results/local/gpt-5-mini \
+    results/local/gemini-2.5-flash
 ```
 
 ---
@@ -929,7 +916,7 @@ python3 scripts/analyze.py results/merged/ --all-conditions
 
 # 4. 특정 모델만 비교
 python3 scripts/analyze.py results/merged/ \
-    --models qwen3-4b llama3.2-3b \
+    --models gpt-5-mini claude-haiku-4-5 \
     --compare
 ```
 
@@ -940,14 +927,14 @@ python3 scripts/analyze.py results/merged/ \
 ```bash
 # 1. 전체 조건 실험
 python3 scripts/run_experiment.py --dataset zeroday --limit 30 \
-    --models qwen3:4b \
+    --models gpt-5-mini \
     --conditions c1 c2 c3 c4
 
 # 2. 전체 조건 분석
 python3 scripts/analyze.py results/local/ --all-conditions
 
 # 결과:
-# results/local/qwen3-4b/
+# results/local/gpt-5-mini/
 # ├── c1_results_analysis.json  # Baseline 분석
 # ├── c2_results_analysis.json  # Vague hints 분석
 # ├── c3_results_analysis.json  # Pre-hoc 분석
