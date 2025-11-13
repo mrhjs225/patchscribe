@@ -13,12 +13,35 @@ from .analysis.symbolic_analysis import SymbolicExplorer
 from .tools import AngrExplorer, ClangStaticAnalyzer
 from .pcg import PCGEdge, PCGNode, ProgramCausalGraph, next_node_id
 
+# Import enhanced analyzers if available
+try:
+    from .analysis.static_analysis_llvm import create_static_analyzer
+    LLVM_STATIC_AVAILABLE = True
+except ImportError:
+    LLVM_STATIC_AVAILABLE = False
+
+try:
+    from .analysis.ast_analysis_pycparser import create_ast_analyzer
+    PYCPARSER_AVAILABLE = True
+except ImportError:
+    PYCPARSER_AVAILABLE = False
+
+# Import LLVM backward slicer
+try:
+    from .tools.llvm_slicer import create_backward_slicer
+    LLVM_SLICER_AVAILABLE = True
+except ImportError:
+    LLVM_SLICER_AVAILABLE = False
+
 
 @dataclass
 class PCGBuilderConfig:
     taint_sources: List[str] = field(
         default_factory=lambda: ["gets", "fgets", "scanf", "read", "recv"]
     )
+    use_llvm_slicing: bool = True  # Use LLVM backward slicing if available
+    apply_causal_filtering: bool = True  # Apply IsCausalRelation filtering (40% reduction)
+    apply_transitive_reduction: bool = True  # Apply transitive reduction
 
 
 class PCGBuilder:
@@ -29,8 +52,25 @@ class PCGBuilder:
         self.seq: Dict[str, int] = {}
 
     def build(self) -> Tuple[ProgramCausalGraph, Dict[str, object]]:
-        static = StaticAnalyzer(self.program, self.vuln_info["location"]).run()
-        ast_result = ASTAnalyzer(self.program, self.vuln_info["location"]).run()
+        # Step 1: LLVM backward slicing (if enabled and available)
+        slice_result = None
+        if self.config.use_llvm_slicing and LLVM_SLICER_AVAILABLE:
+            slicer = create_backward_slicer(self.program)
+            slice_result = slicer.slice(self.vuln_info["location"])
+
+        # Use enhanced analyzers if available, otherwise fallback to regex-based
+        if LLVM_STATIC_AVAILABLE:
+            static_analyzer = create_static_analyzer(self.program, self.vuln_info["location"])
+            static = static_analyzer.run()
+        else:
+            static = StaticAnalyzer(self.program, self.vuln_info["location"]).run()
+
+        if PYCPARSER_AVAILABLE:
+            ast_analyzer = create_ast_analyzer(self.program, self.vuln_info["location"])
+            ast_result = ast_analyzer.run()
+        else:
+            ast_result = ASTAnalyzer(self.program, self.vuln_info["location"]).run()
+
         clang_result = ClangStaticAnalyzer(self.program).run(self.vuln_info["location"])
         dynamic = TaintAnalyzer(
             self.program,
@@ -40,11 +80,26 @@ class PCGBuilder:
         symbolic = SymbolicExplorer(self.program, self.vuln_info["location"]).run()
         angr_result = AngrExplorer(self.program).run()
         graphs = [static.graph, ast_result.graph, dynamic.graph, symbolic.graph]
+
+        # Add LLVM slice graph if available
+        if slice_result:
+            graphs.append(self._graph_from_slice(slice_result))
+
         if clang_result:
             graphs.append(self._graph_from_clang(clang_result))
         if angr_result:
             graphs.append(self._graph_from_angr(angr_result))
+
         combined = self._merge_graphs(graphs)
+
+        # Step 2: Apply causal relation filtering (40% edge reduction)
+        if self.config.apply_causal_filtering:
+            combined = self._filter_causal_relations(combined)
+
+        # Step 3: Apply transitive reduction
+        if self.config.apply_transitive_reduction:
+            combined = self._apply_transitive_reduction(combined)
+
         metadata = {
             "static_trace": static.trace,
             "ast_trace": ast_result.trace,
@@ -52,6 +107,11 @@ class PCGBuilder:
             "symbolic_conditions": symbolic.path_conditions,
             "clang_nodes": [node.__dict__ for node in clang_result.nodes] if clang_result else [],
             "angr_paths": [path.__dict__ for path in angr_result.paths] if angr_result else [],
+            "slice_result": {
+                "size": slice_result.slice_size if slice_result else 0,
+                "data_deps": len(slice_result.data_dependencies) if slice_result else 0,
+                "control_deps": len(slice_result.control_dependencies) if slice_result else 0,
+            } if slice_result else None,
         }
         return combined, metadata
 
@@ -152,3 +212,202 @@ class PCGBuilder:
                 )
             )
         return graph
+
+    def _graph_from_slice(self, slice_result) -> ProgramCausalGraph:
+        """
+        Convert LLVM backward slice result to PCG.
+
+        Args:
+            slice_result: BackwardSliceResult from LLVM slicer
+
+        Returns:
+            ProgramCausalGraph with slice statements as nodes
+        """
+        graph = ProgramCausalGraph()
+        id_map: Dict[int, str] = {}
+
+        # Create nodes from slice statements
+        for stmt in slice_result.statements:
+            node_id = next_node_id(self.seq, "l")
+            id_map[stmt.line_number] = node_id
+            graph.add_node(
+                PCGNode(
+                    node_id=node_id,
+                    node_type=stmt.statement_type,
+                    description=stmt.statement[:100],
+                    location=stmt.line_number,
+                    metadata={"depends_on": stmt.depends_on},
+                )
+            )
+
+        # Add data dependencies as edges
+        for from_line, to_line in slice_result.data_dependencies:
+            if from_line in id_map and to_line in id_map:
+                graph.add_edge(
+                    PCGEdge(
+                        source=id_map[from_line],
+                        target=id_map[to_line],
+                        edge_type="data_flow",
+                        rationale="LLVM SSA def-use chain",
+                    )
+                )
+
+        # Add control dependencies as edges
+        for from_line, to_line in slice_result.control_dependencies:
+            if from_line in id_map and to_line in id_map:
+                graph.add_edge(
+                    PCGEdge(
+                        source=id_map[from_line],
+                        target=id_map[to_line],
+                        edge_type="control_flow",
+                        rationale="LLVM control dependence",
+                    )
+                )
+
+        return graph
+
+    def _filter_causal_relations(self, graph: ProgramCausalGraph) -> ProgramCausalGraph:
+        """
+        Apply IsCausalRelation filtering to remove non-security-relevant edges.
+
+        Paper describes (Section 4.1):
+        - Keep data-dep if target uses value in security-relevant operation
+          (pointer deref, array index, malloc size, format string)
+        - Keep control-dep if branch affects security-critical statement
+        - Keep resource init/cleanup affecting safety
+
+        Expected: ~40% edge reduction while preserving security-relevant paths
+
+        Args:
+            graph: Input PCG
+
+        Returns:
+            Filtered PCG with security-relevant edges only
+        """
+        # Security-relevant patterns
+        security_patterns = {
+            # Pointer/array operations
+            "deref", "dereference", "pointer", "->", "*", "[", "]",
+            # Memory operations
+            "malloc", "calloc", "realloc", "free", "alloc", "memcpy", "memset", "strcpy", "strcat",
+            # Input/output operations
+            "read", "write", "recv", "send", "gets", "fgets", "scanf", "printf", "sprintf",
+            # Bounds checking
+            "size", "length", "len", "count", "index", "bound", "limit",
+            # Validation
+            "check", "validate", "verify", "assert",
+        }
+
+        filtered_graph = ProgramCausalGraph()
+
+        # Keep all nodes
+        for node in graph.nodes.values():
+            filtered_graph.add_node(node)
+
+        # Filter edges based on security relevance
+        for edge in graph.edges:
+            src_node = graph.nodes[edge.source]
+            dst_node = graph.nodes[edge.target]
+
+            # Always keep edges to/from vulnerability-related nodes
+            if self._is_security_relevant_node(src_node, security_patterns) or \
+               self._is_security_relevant_node(dst_node, security_patterns):
+                filtered_graph.add_edge(edge)
+            # For data flow edges, check if target uses value in security-relevant way
+            elif edge.edge_type == "data_flow":
+                if self._is_security_relevant_operation(dst_node, security_patterns):
+                    filtered_graph.add_edge(edge)
+            # For control flow edges, check if branch affects security-critical statement
+            elif edge.edge_type == "control_flow":
+                if self._is_security_critical_branch(src_node, dst_node, security_patterns):
+                    filtered_graph.add_edge(edge)
+
+        return filtered_graph
+
+    def _is_security_relevant_node(self, node: PCGNode, patterns: set) -> bool:
+        """Check if node is security-relevant based on patterns."""
+        description = node.description.lower()
+        return any(pattern in description for pattern in patterns)
+
+    def _is_security_relevant_operation(self, node: PCGNode, patterns: set) -> bool:
+        """Check if node performs security-relevant operation."""
+        description = node.description.lower()
+        # Check for pointer/array operations
+        if any(op in description for op in ["->", "*", "[", "]"]):
+            return True
+        # Check for security-sensitive functions
+        return any(pattern in description for pattern in patterns)
+
+    def _is_security_critical_branch(self, src: PCGNode, dst: PCGNode, patterns: set) -> bool:
+        """Check if control flow edge represents security-critical branching."""
+        # Branches that check bounds, validation, or error conditions are critical
+        src_desc = src.description.lower()
+        dst_desc = dst.description.lower()
+        critical_keywords = {"check", "validate", "verify", "assert", "null", "size", "length", "bound"}
+        return any(kw in src_desc or kw in dst_desc for kw in critical_keywords)
+
+    def _apply_transitive_reduction(self, graph: ProgramCausalGraph) -> ProgramCausalGraph:
+        """
+        Apply transitive reduction to remove redundant edges.
+
+        Paper describes (Section 4.1):
+        - Uses Aho-Garey-Ullman algorithm
+        - Complexity: O(|V|^3)
+        - Expected: Reduces 42 edges to 18 while preserving causal paths
+
+        Args:
+            graph: Input PCG
+
+        Returns:
+            Transitively reduced PCG
+        """
+        # Build adjacency matrix for transitive closure
+        nodes = list(graph.nodes.keys())
+        n = len(nodes)
+        node_to_idx = {node_id: i for i, node_id in enumerate(nodes)}
+
+        # Initialize reachability matrix
+        reach = [[False] * n for _ in range(n)]
+
+        # Set direct edges
+        for edge in graph.edges:
+            if edge.source in node_to_idx and edge.target in node_to_idx:
+                i = node_to_idx[edge.source]
+                j = node_to_idx[edge.target]
+                reach[i][j] = True
+
+        # Compute transitive closure using Warshall's algorithm
+        for k in range(n):
+            for i in range(n):
+                for j in range(n):
+                    reach[i][j] = reach[i][j] or (reach[i][k] and reach[k][j])
+
+        # Create reduced graph
+        reduced = ProgramCausalGraph()
+
+        # Keep all nodes
+        for node in graph.nodes.values():
+            reduced.add_node(node)
+
+        # Keep only non-transitive edges
+        for edge in graph.edges:
+            if edge.source not in node_to_idx or edge.target not in node_to_idx:
+                reduced.add_edge(edge)
+                continue
+
+            src_idx = node_to_idx[edge.source]
+            dst_idx = node_to_idx[edge.target]
+
+            # Check if there's an alternative path from src to dst
+            has_alternative_path = False
+            for k in range(n):
+                if k != src_idx and k != dst_idx:
+                    if reach[src_idx][k] and reach[k][dst_idx]:
+                        has_alternative_path = True
+                        break
+
+            # Keep edge if it's not redundant (no alternative path)
+            if not has_alternative_path:
+                reduced.add_edge(edge)
+
+        return reduced

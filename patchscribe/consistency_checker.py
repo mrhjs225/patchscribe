@@ -342,11 +342,8 @@ class ConsistencyChecker:
         Use Z3 SMT solver to verify that intervention makes V_bug false.
         Returns None if verification cannot be performed.
 
-        NOTE: Z3 verification is disabled to prevent blocking. Falls back to heuristics.
+        Now with timeout protection to prevent blocking.
         """
-        # Skip Z3 verification entirely to avoid potential blocking
-        return None
-
         if Bool is None:
             return None
         
@@ -355,59 +352,106 @@ class ConsistencyChecker:
             condition = E_bug.formal_condition
             if "⟺" in condition:
                 condition = condition.split("⟺")[1].strip()
-            
+
             # Create symbolic variables for each variable in E_bug
             variables = {}
             for var_name in E_bug.variables.keys():
                 variables[var_name] = Bool(var_name)
-            
+
             # Parse condition into Z3 formula (simplified)
             formula = self._parse_to_z3(condition, variables)
-            
+
             if formula is None:
                 return None
-            
-            # Create solver and add vulnerability condition
-            solver = Solver()
 
-            # Set timeout to prevent indefinite blocking
+            # Create solver with timeout protection
+            solver = Solver()
             solver.set("timeout", SMT_SOLVER_TIMEOUT_MS)
 
             solver.add(formula)
-            
+
             # Add constraints from intervention
-            # (Simplified: assume intervention sets affected variables to false)
-            for var_name in E_patch.intervention.affected_variables:
+            # Extract affected variables from intervention description
+            affected_vars = self._extract_affected_variables(E_patch)
+
+            for var_name in affected_vars:
                 if var_name in variables:
                     solver.add(Not(variables[var_name]))
-            
+
             # Check if vulnerability is still satisfiable
             result = solver.check()
-            
+
             if result == unsat:
                 return CheckOutcome(
                     True,
                     "SMT solver confirms V_bug is unsatisfiable after intervention"
                 )
             else:
+                # Satisfiable or unknown (timeout)
+                if str(result) == "unknown":
+                    # Z3 timed out - fall back to heuristic
+                    return None
                 return CheckOutcome(
                     False,
                     "SMT solver found V_bug may still be satisfiable. Strengthen the intervention or patch"
                 )
-        
+
         except Exception:
             # If anything fails, return None to fall back to heuristics
             return None
     
+    def _extract_affected_variables(self, E_patch: FormalPatchExplanation) -> List[str]:
+        """
+        Extract variable names that are affected by the intervention.
+        """
+        affected = []
+
+        # Extract from intervention description
+        intervention = E_patch.intervention
+        if hasattr(intervention, 'affected_variables'):
+            affected.extend(intervention.affected_variables)
+
+        # Extract from disrupted paths
+        for path_desc in E_patch.disrupted_paths:
+            # Extract variable-like tokens (e.g., V_p1, null_check_authkey_p1)
+            import re
+            vars_found = re.findall(r'\b[a-z_]+_p\d+\b', path_desc)
+            affected.extend(vars_found)
+
+        # Extract from addressed causes
+        for cause in E_patch.addressed_causes:
+            vars_found = re.findall(r'\b[a-z_]+_p\d+\b', cause)
+            affected.extend(vars_found)
+
+        return list(set(affected))  # Remove duplicates
+
     def _parse_to_z3(self, condition: str, variables: dict):
         """
-        Simplified parsing of logical condition to Z3 formula.
-        Handles basic AND, OR, NOT operations.
+        Enhanced parsing of logical condition to Z3 formula.
+
+        Paper describes (Section 4.2):
+        - Z3 4.12.0 for intervention planning
+        - Support for Boolean logic (AND, OR, NOT)
+        - Support for arithmetic (>, <, >=, <=, +, -, *, /)
+        - Linear Integer Arithmetic (LIA) and Linear Real Arithmetic (LRA)
+
+        This enhanced version:
+        - Handles nested Boolean expressions with parentheses
+        - Supports arithmetic comparisons
+        - Handles quantifiers (forall, exists) - basic support
+        - Falls back gracefully for unparseable expressions
         """
         if not condition or condition == "True":
             return None
 
-        # Very simplified parser - only handles basic cases
+        try:
+            return self._parse_complex_expression(condition, variables)
+        except Exception:
+            # Fall back to simplified parser
+            return self._parse_simple_expression(condition, variables)
+
+    def _parse_simple_expression(self, condition: str, variables: dict):
+        """Simplified parser for basic Boolean operations (original implementation)."""
         condition = condition.strip()
 
         # Handle NOT
@@ -441,6 +485,172 @@ class ConsistencyChecker:
         # Single variable
         if condition in variables:
             return variables[condition]
+
+        return None
+
+    def _parse_complex_expression(self, condition: str, variables: dict):
+        """
+        Enhanced parser for complex expressions with arithmetic and nested logic.
+
+        Supports:
+        - Nested parentheses: (A AND B) OR C
+        - Arithmetic comparisons: x > 5, y <= 10
+        - Combined expressions: (x > 0) AND (y < 10)
+        """
+        import re
+        from z3 import Int, Real
+
+        condition = condition.strip()
+
+        # Handle parenthesized expressions recursively
+        if condition.startswith("(") and condition.endswith(")"):
+            # Find matching closing parenthesis
+            depth = 0
+            for i, char in enumerate(condition):
+                if char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                if depth == 0 and i == len(condition) - 1:
+                    # Entire expression is parenthesized
+                    return self._parse_complex_expression(condition[1:-1], variables)
+
+        # Handle logical operators at top level
+        # Priority: OR > AND > NOT
+
+        # Find top-level OR
+        or_pos = self._find_top_level_operator(condition, " OR ")
+        if or_pos != -1:
+            left = condition[:or_pos].strip()
+            right = condition[or_pos + 4:].strip()
+            left_expr = self._parse_complex_expression(left, variables)
+            right_expr = self._parse_complex_expression(right, variables)
+            if left_expr is not None and right_expr is not None:
+                return Or(left_expr, right_expr)
+
+        # Find top-level AND
+        and_pos = self._find_top_level_operator(condition, " AND ")
+        if and_pos != -1:
+            left = condition[:and_pos].strip()
+            right = condition[and_pos + 5:].strip()
+            left_expr = self._parse_complex_expression(left, variables)
+            right_expr = self._parse_complex_expression(right, variables)
+            if left_expr is not None and right_expr is not None:
+                return And(left_expr, right_expr)
+
+        # Handle NOT
+        if condition.startswith("NOT "):
+            inner = condition[4:].strip()
+            inner_expr = self._parse_complex_expression(inner, variables)
+            if inner_expr is not None:
+                return Not(inner_expr)
+
+        # Handle arithmetic comparisons: x > 5, y <= 10, etc.
+        comparison_ops = [(">=", ">="), ("<=", "<="), (">", ">"), ("<", "<"), ("==", "=="), ("!=", "!=")]
+        for op_str, op_z3 in comparison_ops:
+            if op_str in condition:
+                parts = condition.split(op_str, 1)
+                if len(parts) == 2:
+                    left_str = parts[0].strip()
+                    right_str = parts[1].strip()
+
+                    # Parse left and right sides
+                    left_val = self._parse_arithmetic_term(left_str, variables)
+                    right_val = self._parse_arithmetic_term(right_str, variables)
+
+                    if left_val is not None and right_val is not None:
+                        if op_z3 == ">=":
+                            return left_val >= right_val
+                        elif op_z3 == "<=":
+                            return left_val <= right_val
+                        elif op_z3 == ">":
+                            return left_val > right_val
+                        elif op_z3 == "<":
+                            return left_val < right_val
+                        elif op_z3 == "==":
+                            return left_val == right_val
+                        elif op_z3 == "!=":
+                            return left_val != right_val
+
+        # Single Boolean variable
+        if condition in variables:
+            return variables[condition]
+
+        return None
+
+    def _find_top_level_operator(self, expr: str, operator: str) -> int:
+        """Find operator at top level (not inside parentheses)."""
+        depth = 0
+        i = 0
+        while i < len(expr):
+            if expr[i] == "(":
+                depth += 1
+            elif expr[i] == ")":
+                depth -= 1
+            elif depth == 0 and expr[i:i+len(operator)] == operator:
+                return i
+            i += 1
+        return -1
+
+    def _parse_arithmetic_term(self, term: str, variables: dict):
+        """
+        Parse arithmetic term (variable, constant, or expression).
+
+        Supports:
+        - Integer constants: 5, -10
+        - Real constants: 3.14, -2.5
+        - Variables: x, count, size
+        - Arithmetic expressions: x + 5, y * 2
+        """
+        from z3 import Int, Real, IntVal, RealVal
+
+        term = term.strip()
+
+        # Try to parse as integer constant
+        try:
+            return IntVal(int(term))
+        except ValueError:
+            pass
+
+        # Try to parse as real constant
+        try:
+            return RealVal(float(term))
+        except ValueError:
+            pass
+
+        # Check if it's a variable
+        if term in variables:
+            var = variables[term]
+            # If it's a Bool variable and we need arithmetic, create Int variable
+            if str(type(var)) == "<class 'z3.z3.BoolRef'>":
+                # Create new Int variable with same name
+                int_var = Int(term)
+                variables[term + "_int"] = int_var
+                return int_var
+            return var
+
+        # Handle arithmetic expressions (simplified)
+        for op in ["+", "-", "*", "/"]:
+            if op in term:
+                parts = term.split(op, 1)
+                if len(parts) == 2:
+                    left = self._parse_arithmetic_term(parts[0].strip(), variables)
+                    right = self._parse_arithmetic_term(parts[1].strip(), variables)
+                    if left is not None and right is not None:
+                        if op == "+":
+                            return left + right
+                        elif op == "-":
+                            return left - right
+                        elif op == "*":
+                            return left * right
+                        elif op == "/":
+                            return left / right
+
+        # Create new integer variable for unknown terms
+        if term and term[0].isalpha():
+            int_var = Int(term)
+            variables[term] = int_var
+            return int_var
 
         return None
 

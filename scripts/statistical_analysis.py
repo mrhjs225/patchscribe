@@ -20,6 +20,12 @@ import numpy as np
 from scipy.stats import ttest_rel, wilcoxon, friedmanchisquare
 from scipy import stats
 
+try:
+    from statsmodels.stats.power import TTestIndPower
+    POWER_ANALYSIS_AVAILABLE = True
+except ImportError:
+    POWER_ANALYSIS_AVAILABLE = False
+
 
 def load_unified_results(unified_dir: Path) -> Dict[str, List[Dict]]:
     """Load unified results organized by condition"""
@@ -159,6 +165,71 @@ def analyze_monotonicity(scores_by_condition: Dict[str, List[float]]) -> Dict:
     }
 
 
+def compute_power_analysis(
+    observed_effect_size: float,
+    sample_size: int,
+    alpha: float = 0.0125,  # Bonferroni corrected: 0.05/4
+    alternative: str = 'two-sided'
+) -> Dict[str, float]:
+    """
+    A priori power analysis to validate sample size sufficiency.
+
+    This implements the power analysis described in the paper to demonstrate
+    that n=121 samples is sufficient for detecting the observed effect size.
+
+    Args:
+        observed_effect_size: Cohen's d from the experiment
+        sample_size: Actual sample size (n=121 in paper)
+        alpha: Significance level (Bonferroni corrected)
+        alternative: 'two-sided', 'larger', or 'smaller'
+
+    Returns:
+        Dictionary with:
+        - achieved_power: Statistical power achieved (β)
+        - required_sample_size: Minimum n needed for 80% power
+        - effect_size: Cohen's d used
+        - alpha: Significance level
+        - interpretation: Whether sample size is sufficient
+    """
+    if not POWER_ANALYSIS_AVAILABLE:
+        return {
+            'error': 'statsmodels not available',
+            'message': 'Install statsmodels for power analysis: pip install statsmodels'
+        }
+
+    power_analysis = TTestIndPower()
+
+    # Compute achieved power with actual sample size
+    achieved_power = power_analysis.solve_power(
+        effect_size=observed_effect_size,
+        nobs1=sample_size,
+        alpha=alpha,
+        alternative=alternative
+    )
+
+    # Compute required sample size for 80% power (standard threshold)
+    required_n = power_analysis.solve_power(
+        effect_size=observed_effect_size,
+        power=0.80,
+        alpha=alpha,
+        alternative=alternative
+    )
+
+    results = {
+        'achieved_power': float(achieved_power),
+        'required_sample_size': int(np.ceil(required_n)),
+        'actual_sample_size': sample_size,
+        'effect_size': observed_effect_size,
+        'alpha': alpha,
+        'interpretation': (
+            'Sufficient (well-powered)' if achieved_power >= 0.80
+            else 'Insufficient (underpowered)'
+        )
+    }
+
+    return results
+
+
 def format_significance(p_value: float) -> str:
     """Format p-value with significance markers"""
     if p_value < 0.001:
@@ -179,6 +250,8 @@ def main():
                         help='Output file for statistical report')
     parser.add_argument('--metrics', type=str, default='accuracy,completeness,causality,clarity',
                         help='Comma-separated list of metrics to analyze')
+    parser.add_argument('--include-power-analysis', action='store_true',
+                        help='Include power analysis to validate sample size')
 
     args = parser.parse_args()
 
@@ -298,6 +371,34 @@ def main():
                 f.write(f"Wilcoxon signed-rank test (non-parametric):\n")
                 f.write(f"  W = {w_stat:.3f}, {format_significance(p_val_w)}\n")
                 f.write(f"  Effect size (r): {r:.3f}\n\n")
+
+                # Power analysis (if requested)
+                if args.include_power_analysis and abs(cohens_d) > 0.01:
+                    f.write(f"### Power Analysis\n\n")
+
+                    power_results = compute_power_analysis(
+                        observed_effect_size=abs(cohens_d),
+                        sample_size=min_len,
+                        alpha=0.0125  # Bonferroni correction: 0.05/4 conditions
+                    )
+
+                    if 'error' in power_results:
+                        f.write(f"  {power_results['message']}\n\n")
+                    else:
+                        f.write(f"  Effect size (Cohen's d): {power_results['effect_size']:.3f}\n")
+                        f.write(f"  Actual sample size: {power_results['actual_sample_size']}\n")
+                        f.write(f"  Significance level (α): {power_results['alpha']:.4f} (Bonferroni corrected)\n")
+                        f.write(f"  Required sample size (80% power): {power_results['required_sample_size']}\n")
+                        f.write(f"  Achieved power (β): {power_results['achieved_power']:.3f} ({power_results['achieved_power']*100:.1f}%)\n")
+                        f.write(f"  Interpretation: {power_results['interpretation']}\n\n")
+
+                        # Comparison with paper
+                        if power_results['achieved_power'] >= 0.85:
+                            f.write(f"  ✅ Study is well-powered (β ≥ 0.85), consistent with paper's claim of β=0.86\n\n")
+                        elif power_results['achieved_power'] >= 0.80:
+                            f.write(f"  ✅ Study has adequate power (β ≥ 0.80)\n\n")
+                        else:
+                            f.write(f"  ⚠️ Study is underpowered (β < 0.80). Consider increasing sample size.\n\n")
 
             # Friedman test (all conditions)
             if len(scores_by_condition) >= 3:
