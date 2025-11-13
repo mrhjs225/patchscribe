@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import statistics
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -37,6 +38,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from patchscribe.llm import LLMClient, LLMConfig
 from patchscribe.success_judge import PatchSuccessJudge
+from patchscribe.evaluation.manual_rubric import (
+    InterRaterReliability,
+    load_manual_evaluations_from_csv,
+    manual_evaluation_to_dict,
+)
 
 
 class ResultEvaluator:
@@ -46,15 +52,19 @@ class ResultEvaluator:
         self,
         *,
         batch_size: int = 5,
+        manual_eval_files: Optional[List[Path]] = None,
     ):
         """
         Args:
             batch_size: Batch size for parallel evaluation
         """
         self.batch_size = batch_size
+        self.manual_eval_files = [Path(p) for p in manual_eval_files] if manual_eval_files else []
 
         # Initialize success judge with gpt-5-mini only
         self.success_judge = PatchSuccessJudge()
+        self.manual_evaluations = self._load_manual_evaluations()
+        self.manual_eval_index = self._index_manual_evaluations()
 
         print(f"[OK] Initialized evaluator with judge: gpt-5-mini")
         print(f"   Voting method: single judge")
@@ -113,6 +123,8 @@ class ResultEvaluator:
             'success_evaluated': not skip_success,
             'explanation_evaluated': not skip_explanation,
         }
+
+        self._inject_manual_reviews(cases, data)
 
         # Save evaluated results
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -307,6 +319,58 @@ class ResultEvaluator:
 
         print(f"  [OK] Successfully evaluated {success_count}/{len(prompts)} explanations")
 
+    def _load_manual_evaluations(self) -> List:
+        """Load manual rubric rows from provided CSV files."""
+        evaluations = []
+        for path in self.manual_eval_files:
+            if not path.exists():
+                print(f"[WARN] Manual evaluation file not found: {path}")
+                continue
+            try:
+                loaded = load_manual_evaluations_from_csv(path)
+                evaluations.extend(loaded)
+                print(f"[OK] Loaded {len(loaded)} manual reviews from {path.name}")
+            except Exception as exc:
+                print(f"[WARN] Failed to load manual evaluations from {path}: {exc}")
+        return evaluations
+
+    def _index_manual_evaluations(self) -> Dict[str, List]:
+        """Group manual evaluations by case ID for quick lookup."""
+        index: Dict[str, List] = {}
+        for evaluation in self.manual_evaluations:
+            index.setdefault(evaluation.case_id, []).append(evaluation)
+        return index
+
+    def _inject_manual_reviews(self, cases: List[Dict], data: Dict[str, object]) -> None:
+        """Attach manual evaluations to matching cases and record summary stats."""
+        if not self.manual_eval_index:
+            return
+
+        attached_cases = 0
+        overall_scores: List[float] = []
+
+        for case in cases:
+            case_id = case.get('case_id') or case.get('id') or case.get('filename')
+            if not case_id:
+                continue
+            reviews = self.manual_eval_index.get(case_id)
+            if not reviews:
+                continue
+            case['manual_reviews'] = [manual_evaluation_to_dict(review) for review in reviews]
+            attached_cases += 1
+            overall_scores.extend(review.overall_score for review in reviews)
+
+        summary: Dict[str, object] = {
+            'cases_with_manual_reviews': attached_cases,
+            'total_manual_reviews': len(self.manual_evaluations),
+        }
+        if overall_scores:
+            summary['mean_overall_score'] = sum(overall_scores) / len(overall_scores)
+        if len(self.manual_evaluations) >= 2:
+            summary['cohens_kappa'] = InterRaterReliability.calculate_all_kappas(self.manual_evaluations)
+
+        data['manual_evaluation_summary'] = summary
+
     @staticmethod
     def _find_latest_results(input_path: Path) -> List[Path]:
         """
@@ -457,6 +521,12 @@ Example usage:
         default=5,
         help='Number of parallel judge requests (default: 5). Higher values = faster but more API load'
     )
+    parser.add_argument(
+        '--manual-evals',
+        nargs='+',
+        type=Path,
+        help='One or more CSV files containing manual rubric evaluations to merge'
+    )
 
     args = parser.parse_args()
 
@@ -504,6 +574,7 @@ Example usage:
     # Initialize evaluator (use only gpt-5-mini)
     evaluator = ResultEvaluator(
         batch_size=args.concurrency,
+        manual_eval_files=args.manual_evals,
     )
 
     # Process files in parallel

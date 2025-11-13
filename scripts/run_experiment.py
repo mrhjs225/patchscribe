@@ -20,6 +20,7 @@ Usage examples:
         --llm-provider openai --models gpt-5-mini \
         --conditions c4
 """
+import hashlib
 import json
 import sys
 import os
@@ -420,6 +421,12 @@ def _model_output_dir(output_dir: Path, model_name: str, run_label: Optional[str
     return base_dir
 
 
+def _compute_config_hash(config_snapshot: Dict[str, object]) -> str:
+    """Return stable hash of experiment configuration."""
+    canonical = json.dumps(config_snapshot, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
 def run_single_evaluation(
     cases: List[Dict],
     model_spec: str,
@@ -431,6 +438,7 @@ def run_single_evaluation(
     verbose: bool = True,
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
+    dataset_name: str = "",
 ) -> Dict:
     """Run evaluation for a single model × condition"""
     from patchscribe.pipeline import PatchScribePipeline
@@ -518,17 +526,46 @@ def run_single_evaluation(
         max_workers=evaluator_kwargs.get('max_workers'),
     )
     report = evaluator.run(cases)
+    report_payload = report.as_dict()
+
+    prompt_snapshot = None
+    if prompt_options is not None:
+        prompt_snapshot = {
+            "include_interventions": getattr(prompt_options, "include_interventions", None),
+            "include_natural_context": getattr(prompt_options, "include_natural_context", None),
+            "include_guidelines": getattr(prompt_options, "include_guidelines", None),
+            "include_provider_hint": getattr(prompt_options, "include_provider_hint", None),
+        }
+    config_snapshot = {
+        "dataset": dataset_name,
+        "model": model_name,
+        "condition": condition,
+        "provider": provider,
+        "endpoint": endpoint,
+        "timeout": timeout,
+        "max_tokens": max_tokens,
+        "concurrency": concurrency,
+        "consistency_check": final_consistency_check,
+        "stage1_cache": str(stage1_cache_dir) if stage1_cache_dir else None,
+        "force_stage1_recompute": force_stage1_recompute,
+        "prompt_options": prompt_snapshot,
+    }
+    config_hash = _compute_config_hash(config_snapshot)
+    report_payload["config_fingerprint"] = {
+        "hash": config_hash,
+        "snapshot": config_snapshot,
+    }
 
     # Save results
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, 'w') as f:
-        json.dump(report.as_dict(), f, indent=2)
+        json.dump(report_payload, f, indent=2)
 
-    success_rate = report.metrics.get('success_rate', 0)
+    success_rate = report_payload.get('metrics', {}).get('success_rate', 0)
     if verbose:
         print(f"    [OK] Success rate: {success_rate:.1%}")
 
-    return report.as_dict()
+    return report_payload
 
 
 def generate_incomplete_patches(cases: List[Dict], output_file: Path, verbose: bool = True) -> Dict:
@@ -646,13 +683,13 @@ def run_experiment(
         results_summary = _run_experiment_parallel(
             cases, models, conditions, output_dir, llm_config,
             server_id, verbose, run_label, disable_consistency_check,
-            stage1_cache_dir, force_stage1_recompute
+            stage1_cache_dir, force_stage1_recompute, dataset_name=dataset
         )
     else:
         results_summary = _run_experiment_sequential(
             cases, models, conditions, output_dir, llm_config,
             server_id, verbose, run_label, disable_consistency_check,
-            stage1_cache_dir, force_stage1_recompute
+            stage1_cache_dir, force_stage1_recompute, dataset_name=dataset
         )
 
     # Generate incomplete patches (RQ2)
@@ -725,6 +762,7 @@ def _run_experiment_sequential(
     disable_consistency_check: bool = False,
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
+    dataset_name: str = "",
 ) -> List[Dict]:
     """Sequential processing mode (original behavior)"""
     results_summary = []
@@ -761,6 +799,7 @@ def _run_experiment_sequential(
                     model_spec,
                     condition,
                     output_file,
+                    dataset_name=dataset_name,
                     llm_config=llm_config,
                     disable_consistency_check=disable_consistency_check,
                     verbose=verbose,
@@ -809,6 +848,7 @@ def _run_experiment_parallel(
     disable_consistency_check: bool = False,
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
+    dataset_name: str = "",
 ) -> List[Dict]:
     """Parallel processing mode: Process all (model, condition) combinations concurrently"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -864,6 +904,7 @@ def _run_experiment_parallel(
                 model_spec,
                 condition,
                 output_file,
+                dataset_name=dataset_name,
                 llm_config=llm_config,
                 disable_consistency_check=disable_consistency_check,
                 verbose=False,  # Turn off individual verbose during parallel execution

@@ -1,8 +1,10 @@
 """
-Aggregator that combines static, dynamic, and symbolic analyses into a unified PCG.
+Aggregator that combines static, dynamic, symbolic, and absence analyses into a unified PCG.
 """
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
@@ -10,6 +12,7 @@ from .analysis.ast_analysis import ASTAnalyzer
 from .analysis.dynamic_analysis import TaintAnalyzer
 from .analysis.static_analysis import StaticAnalyzer
 from .analysis.symbolic_analysis import SymbolicExplorer
+from .analysis.absence_analysis import AbsenceAnalyzer, AbsenceAnalysisResult, AbsenceFinding
 from .tools import AngrExplorer, ClangStaticAnalyzer
 from .pcg import PCGEdge, PCGNode, ProgramCausalGraph, next_node_id
 
@@ -42,6 +45,9 @@ class PCGBuilderConfig:
     use_llvm_slicing: bool = True  # Use LLVM backward slicing if available
     apply_causal_filtering: bool = True  # Apply IsCausalRelation filtering (40% reduction)
     apply_transitive_reduction: bool = True  # Apply transitive reduction
+    strict_dependencies: bool = True  # Require LLVM/Clang tooling (no silent fallback)
+    require_precise_static: bool = True  # Disallow regex-only static analysis
+    enable_absence_detection: bool = True  # Emit MissingGuard nodes
 
 
 class PCGBuilder:
@@ -50,6 +56,13 @@ class PCGBuilder:
         self.vuln_info = vuln_info
         self.config = config or PCGBuilderConfig()
         self.seq: Dict[str, int] = {}
+        self.lines = self.program.splitlines()
+        allow_relaxed = (
+            os.environ.get("PATCHSCRIBE_ALLOW_HEURISTICS", "").strip().lower()
+            in {"1", "true", "yes"}
+        )
+        self._strict_analysis = self.config.strict_dependencies and not allow_relaxed
+        self._ensure_dependencies()
 
     def build(self) -> Tuple[ProgramCausalGraph, Dict[str, object]]:
         # Step 1: LLVM backward slicing (if enabled and available)
@@ -79,6 +92,9 @@ class PCGBuilder:
         ).run()
         symbolic = SymbolicExplorer(self.program, self.vuln_info["location"]).run()
         angr_result = AngrExplorer(self.program).run()
+        absence_result: AbsenceAnalysisResult | None = None
+        if self.config.enable_absence_detection:
+            absence_result = AbsenceAnalyzer(self.program, self.vuln_info["location"]).run()
         graphs = [static.graph, ast_result.graph, dynamic.graph, symbolic.graph]
 
         # Add LLVM slice graph if available
@@ -89,8 +105,13 @@ class PCGBuilder:
             graphs.append(self._graph_from_clang(clang_result))
         if angr_result:
             graphs.append(self._graph_from_angr(angr_result))
+        if absence_result:
+            graphs.append(absence_result.graph)
 
         combined = self._merge_graphs(graphs)
+        self._enrich_node_metadata(combined)
+        if absence_result and absence_result.findings:
+            self._attach_absence_nodes(combined, absence_result.findings)
 
         # Step 2: Apply causal relation filtering (40% edge reduction)
         if self.config.apply_causal_filtering:
@@ -112,8 +133,35 @@ class PCGBuilder:
                 "data_deps": len(slice_result.data_dependencies) if slice_result else 0,
                 "control_deps": len(slice_result.control_dependencies) if slice_result else 0,
             } if slice_result else None,
+            "absence_findings": [
+                finding.to_dict() for finding in (absence_result.findings if absence_result else [])
+            ],
+            "pcg_summary": {
+                "node_count": len(combined.nodes),
+                "edge_count": len(combined.edges),
+                "missing_guard_count": sum(
+                    1 for node in combined.nodes.values() if node.node_type == "missing_guard"
+                ),
+            },
         }
         return combined, metadata
+
+    def _ensure_dependencies(self) -> None:
+        """Fail fast if strict analysis is requested but dependencies are missing."""
+        if not self._strict_analysis:
+            return
+
+        missing: List[str] = []
+        if self.config.use_llvm_slicing and not LLVM_SLICER_AVAILABLE:
+            missing.append("llvm_slicer")
+        if self.config.require_precise_static and not LLVM_STATIC_AVAILABLE:
+            missing.append("llvm_static")
+        if missing:
+            raise RuntimeError(
+                "Precise analysis requested but dependencies unavailable: "
+                + ", ".join(missing)
+                + ". Set PATCHSCRIBE_ALLOW_HEURISTICS=1 to fall back for testing."
+            )
 
     def _merge_graphs(self, graphs: List[ProgramCausalGraph]) -> ProgramCausalGraph:
         merged = ProgramCausalGraph()
@@ -411,3 +459,105 @@ class PCGBuilder:
                 reduced.add_edge(edge)
 
         return reduced
+
+    def _attach_absence_nodes(
+        self,
+        graph: ProgramCausalGraph,
+        findings: List[AbsenceFinding],
+    ) -> None:
+        """Connect MissingGuard nodes to the most relevant vulnerability nodes."""
+        vuln_nodes = [
+            node for node in graph.nodes.values() if node.node_type == "vulnerability"
+        ]
+        vuln_target = vuln_nodes[0].node_id if vuln_nodes else None
+
+        for finding in findings:
+            evidence = getattr(finding, "evidence", {}) or {}
+            node_id = evidence.get("node_id")
+            line = getattr(finding, "line", None)
+            rationale = getattr(finding, "rationale", "")
+
+            if not node_id or node_id not in graph.nodes:
+                continue
+
+            target_id = (
+                self._find_node_at_line(graph, line)
+                if line is not None
+                else None
+            )
+            if not target_id:
+                target_id = vuln_target
+
+            if not target_id:
+                continue
+
+            graph.add_edge(
+                PCGEdge(
+                    source=node_id,
+                    target=target_id,
+                    edge_type="absence",
+                    rationale=rationale or "missing guard influences vulnerability",
+                )
+            )
+
+    def _find_node_at_line(self, graph: ProgramCausalGraph, line: int | None) -> str | None:
+        if line is None:
+            return None
+        for node in graph.nodes.values():
+            if node.node_id.startswith("m"):
+                continue
+            if node.location == line:
+                return node.node_id
+        return None
+
+    def _enrich_node_metadata(self, graph: ProgramCausalGraph) -> None:
+        """Populate identifier/datatype/value_range metadata for SCM + SMT layers."""
+        for node in graph.nodes.values():
+            metadata = node.metadata or {}
+            identifier = metadata.get("identifier") or self._infer_identifier(node)
+            datatype = metadata.get("datatype") or self._infer_datatype(node)
+            value_range = metadata.get("value_range") or self._infer_value_range(node)
+            if identifier:
+                metadata["identifier"] = identifier
+            if datatype:
+                metadata["datatype"] = datatype
+            if value_range:
+                metadata["value_range"] = value_range
+            node.metadata = metadata
+
+    def _infer_identifier(self, node: PCGNode) -> str:
+        description = node.description or ""
+        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", description)
+        if tokens:
+            return tokens[0]
+        line_text = self._line_text(node.location)
+        matches = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", line_text)
+        return matches[0] if matches else node.node_id
+
+    def _infer_datatype(self, node: PCGNode) -> str:
+        desc = (node.description or "").lower()
+        if "pointer" in desc or "*" in desc or "->" in desc:
+            return "pointer"
+        if "len" in desc or "size" in desc or "[" in desc:
+            return "size"
+        if node.node_type in {"predicate", "missing_guard", "vulnerability"}:
+            return "bool"
+        return "int"
+
+    def _infer_value_range(self, node: PCGNode) -> List[str]:
+        line = self._line_text(node.location).strip()
+        ranges: List[str] = []
+        if not line:
+            return ranges
+        for match in re.finditer(r"(<=|>=|<|>)\s*([0-9]+)", line):
+            ranges.append(f"{match.group(1)} {match.group(2)}")
+        for match in re.finditer(r"\[(\d+)\]", line):
+            ranges.append(f"< {match.group(1)}")
+        if "NULL" in line or "null" in line.lower():
+            ranges.append("!= NULL")
+        return ranges
+
+    def _line_text(self, line_number: int | None) -> str:
+        if line_number and 1 <= line_number <= len(self.lines):
+            return self.lines[line_number - 1]
+        return ""

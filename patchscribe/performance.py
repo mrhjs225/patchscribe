@@ -4,8 +4,10 @@ Supports RQ3: Scalability and Performance evaluation.
 """
 from __future__ import annotations
 
+import csv
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional
 
 try:
@@ -33,6 +35,7 @@ class PerformanceProfile:
     peak_memory_mb: float | None = None
     phase_memory_mb: Dict[str, float] | None = None
     code_complexity: Dict[str, object] | None = None
+    llm_calls: List[Dict[str, object]] = field(default_factory=list)
     
     def as_dict(self) -> Dict[str, object]:
         result = {
@@ -68,6 +71,7 @@ class PerformanceProfiler:
         self.total_end = None
         self.process = psutil.Process() if PSUTIL_AVAILABLE else None
         self.initial_memory = None
+        self.llm_calls: List[Dict[str, object]] = []
         
     def start_total(self):
         """Start timing the entire execution"""
@@ -88,6 +92,10 @@ class PerformanceProfiler:
         """Add phase metrics manually"""
         self.phases.append(metrics)
     
+    def record_llm_call(self, record: Dict[str, object]) -> None:
+        """Record telemetry from an LLM request."""
+        self.llm_calls.append(record)
+
     def get_profile(
         self,
         case_id: str,
@@ -125,7 +133,8 @@ class PerformanceProfiler:
             iteration_count=iteration_count,
             peak_memory_mb=peak_memory,
             phase_memory_mb=phase_memory or None,
-            code_complexity=code_complexity
+            code_complexity=code_complexity,
+            llm_calls=list(self.llm_calls),
         )
     
     def reset(self):
@@ -134,6 +143,7 @@ class PerformanceProfiler:
         self.total_start = None
         self.total_end = None
         self.initial_memory = None
+        self.llm_calls = []
 
 
 class _PhaseContext:
@@ -199,3 +209,37 @@ def categorize_complexity(loc: int) -> str:
         return "medium"
     else:
         return "complex"
+
+
+def export_llm_calls_to_csv(
+    profiles: List[PerformanceProfile],
+    output_path: Path,
+) -> None:
+    """Export aggregated LLM call telemetry to CSV."""
+    fieldnames = [
+        "case_id",
+        "model",
+        "provider",
+        "duration_ms",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "timestamp",
+    ]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for profile in profiles:
+            for call in profile.llm_calls or []:
+                row = {
+                    "case_id": profile.case_id,
+                    "model": call.get("model"),
+                    "provider": call.get("provider"),
+                    "duration_ms": f"{call.get('duration_ms', 0):.2f}",
+                    "prompt_tokens": call.get("prompt_tokens"),
+                    "completion_tokens": call.get("completion_tokens"),
+                    "total_tokens": call.get("total_tokens"),
+                    "timestamp": call.get("timestamp"),
+                }
+                writer.writerow(row)

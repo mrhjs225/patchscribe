@@ -26,6 +26,7 @@ class Intervention:
     semantic_action: str = ""  # NEW: Constructive guidance for LLM
     causal_role: str = ""      # NEW: Explanation of causal role
     variable_name: str = ""    # NEW: Semantic variable name
+    formal_do: str = ""        # NEW: Explicit do(X = value) expression
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -35,6 +36,7 @@ class Intervention:
             "semantic_action": self.semantic_action,
             "causal_role": self.causal_role,
             "variable_name": self.variable_name,
+            "formal_do": self.formal_do,
         }
 
     @classmethod
@@ -46,6 +48,7 @@ class Intervention:
             semantic_action=data.get("semantic_action", ""),
             causal_role=data.get("causal_role", ""),
             variable_name=data.get("variable_name", ""),
+            formal_do=data.get("formal_do", ""),
         )
 
 
@@ -99,6 +102,7 @@ class InterventionPlanner:
 
                 enforce = f"ENFORCE NOT {variable}"
                 rationale = f"Prevent {parent.description} from triggering vulnerability"
+                formal_do = self._build_formal_do(variable, enforce)
 
                 interventions.append(
                     Intervention(
@@ -108,6 +112,7 @@ class InterventionPlanner:
                         semantic_action=semantic_action,
                         causal_role=causal_role,
                         variable_name=variable,
+                        formal_do=formal_do,
                     )
                 )
         interventions = _deduplicate_interventions(interventions)
@@ -234,6 +239,20 @@ class InterventionPlanner:
                 if var not in ['if', 'for', 'while', 'return', 'NULL', 'null']:
                     return var
         return ""
+
+    @staticmethod
+    def _build_formal_do(variable: str, enforce: str) -> str:
+        """
+        Convert planner's enforce text into Pearl-style do-operator.
+        Example: ENFORCE NOT cond -> do(cond = false)
+        """
+        normalized = enforce.strip().lower()
+        if normalized.startswith("enforce not"):
+            return f"do({variable} = false)"
+        if normalized.startswith("enforce"):
+            assign = normalized.replace("enforce", "", 1).strip()
+            return f"do({variable} = {assign})"
+        return f"do({variable})"
 
 
 class _Expr:

@@ -15,6 +15,7 @@ Paper describes:
 """
 from __future__ import annotations
 
+import csv
 import json
 import statistics
 from dataclasses import dataclass, asdict
@@ -647,3 +648,110 @@ def present_evaluation_interface(
         evaluation_time_minutes=15,
         timestamp='2025-11-13T00:00:00'
     )
+
+
+def manual_evaluation_to_dict(evaluation: ManualEvaluation) -> Dict[str, object]:
+    """Serialize ManualEvaluation into a JSON-friendly dictionary."""
+    def _dimension_dict(dimension: EvaluationDimension) -> Dict[str, object]:
+        return {
+            "dimension_name": dimension.dimension_name,
+            "score": dimension.score.value,
+            "label": dimension.score.name,
+            "justification": dimension.justification,
+            "specific_issues": list(dimension.specific_issues),
+            "strengths": list(dimension.strengths),
+        }
+
+    return {
+        "evaluator_id": evaluation.evaluator_id,
+        "case_id": evaluation.case_id,
+        "accuracy": _dimension_dict(evaluation.accuracy),
+        "completeness": _dimension_dict(evaluation.completeness),
+        "clarity": _dimension_dict(evaluation.clarity),
+        "causality": _dimension_dict(evaluation.causality),
+        "overall_score": evaluation.overall_score,
+        "recommend_deployment": evaluation.recommend_deployment,
+        "additional_comments": evaluation.additional_comments,
+        "evaluation_time_minutes": evaluation.evaluation_time_minutes,
+        "timestamp": evaluation.timestamp,
+    }
+
+
+def load_manual_evaluations_from_csv(path: Path) -> List[ManualEvaluation]:
+    """
+    Load manual evaluation data from a CSV file following the rubric template.
+    """
+    evaluations: List[ManualEvaluation] = []
+    with path.open("r", encoding="utf-8-sig") as fp:
+        reader = csv.DictReader(fp)
+        for row in reader:
+            case_id = (row.get("case_id") or row.get("id") or "").strip()
+            evaluator_id = (row.get("evaluator_id") or row.get("reviewer") or "").strip()
+            if not case_id or not evaluator_id:
+                continue
+
+            dimensions: Dict[str, EvaluationDimension] = {}
+            for dim in ("accuracy", "completeness", "clarity", "causality"):
+                score_value = row.get(f"{dim}_score") or row.get(dim)
+                if not score_value:
+                    continue
+                try:
+                    likert = LikertScore(int(score_value))
+                except (ValueError, KeyError):
+                    continue
+                dimensions[dim] = EvaluationDimension(
+                    dimension_name=dim,
+                    score=likert,
+                    justification=(row.get(f"{dim}_justification") or "").strip(),
+                    specific_issues=_parse_semicolon_list(row.get(f"{dim}_issues")),
+                    strengths=_parse_semicolon_list(row.get(f"{dim}_strengths")),
+                )
+
+            if len(dimensions) != 4:
+                continue
+
+            raw_overall = row.get("overall_score")
+            if raw_overall:
+                try:
+                    overall_score = float(raw_overall)
+                except ValueError:
+                    overall_score = statistics.mean(dim.score.value for dim in dimensions.values())
+            else:
+                overall_score = statistics.mean(dim.score.value for dim in dimensions.values())
+
+            recommend = (row.get("recommend_deployment") or "").strip().lower()
+            recommend_flag = recommend in {"1", "true", "yes", "y"}
+
+            additional_comments = (row.get("additional_comments") or "").strip()
+            eval_minutes = row.get("evaluation_time_minutes") or row.get("duration_minutes") or "0"
+            try:
+                evaluation_time_minutes = int(eval_minutes)
+            except ValueError:
+                evaluation_time_minutes = 0
+
+            timestamp = row.get("timestamp") or datetime.utcnow().isoformat()
+
+            evaluations.append(
+                ManualEvaluation(
+                    evaluator_id=evaluator_id,
+                    case_id=case_id,
+                    accuracy=dimensions["accuracy"],
+                    completeness=dimensions["completeness"],
+                    clarity=dimensions["clarity"],
+                    causality=dimensions["causality"],
+                    overall_score=overall_score,
+                    recommend_deployment=recommend_flag,
+                    additional_comments=additional_comments,
+                    evaluation_time_minutes=evaluation_time_minutes,
+                    timestamp=timestamp,
+                )
+            )
+
+    return evaluations
+
+
+def _parse_semicolon_list(raw: Optional[str]) -> List[str]:
+    if not raw:
+        return []
+    parts = [item.strip() for item in str(raw).split(";")]
+    return [item for item in parts if item]

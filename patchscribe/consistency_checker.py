@@ -30,6 +30,7 @@ class ConsistencyResult:
     completeness: CheckOutcome
     ground_truth_alignment: Optional[CheckOutcome] = None  # New: check against ground truth
     patch_effectiveness: Optional[CheckOutcome] = None     # New: verify actual vulnerability removal
+    overall_score: float = 0.0
 
     @property
     def overall(self) -> bool:
@@ -46,6 +47,7 @@ class ConsistencyResult:
             and self.intervention_validity.passed
             and self.logical_consistency.passed
             and self.completeness.passed
+            and self.overall_score >= 0.85
         )
 
     def failed_checks(self) -> List[str]:
@@ -83,7 +85,11 @@ class ConsistencyResult:
             'causal_coverage',
             'logical_consistency'
         }
-        if len(failures) == 1 and failures[0] not in critical:
+        if any(f in {'ground_truth_alignment', 'patch_effectiveness'} for f in failures):
+            return "fail"
+        if self.overall_score >= 0.85 and not any(f in critical for f in failures):
+            return "pass"
+        if self.overall_score >= 0.70:
             return "review"
         return "fail"
 
@@ -99,6 +105,7 @@ class ConsistencyResult:
             'logical_consistency': self.logical_consistency.__dict__,
             'completeness': self.completeness.__dict__,
             'overall': self.overall,
+            'overall_score': self.overall_score,
             'confidence_level': self.confidence_level,
             'accepted': self.accepted,
             'failed_checks': self.failed_checks(),
@@ -153,7 +160,44 @@ class ConsistencyChecker:
                 E_patch, ground_truth
             )
 
+        result.overall_score = self._aggregate_scores(result)
         return result
+
+    def _aggregate_scores(self, result: ConsistencyResult) -> float:
+        """Compute weighted score for acceptance tiers."""
+        weights = {
+            "causal_coverage": 0.3,
+            "intervention_validity": 0.2,
+            "logical_consistency": 0.25,
+            "completeness": 0.15,
+            "alignment": 0.1,
+        }
+        scores = {
+            "causal_coverage": self._score_or_default(result.causal_coverage),
+            "intervention_validity": self._score_or_default(result.intervention_validity),
+            "logical_consistency": self._score_or_default(result.logical_consistency),
+            "completeness": self._score_or_default(result.completeness),
+        }
+        if result.ground_truth_alignment:
+            alignment_score = self._score_or_default(result.ground_truth_alignment)
+        elif result.patch_effectiveness:
+            alignment_score = self._score_or_default(result.patch_effectiveness)
+        else:
+            alignment_score = scores["logical_consistency"]
+        scores["alignment"] = alignment_score
+
+        total = 0.0
+        for key, weight in weights.items():
+            total += weight * scores.get(key, 0.0)
+        return total
+
+    @staticmethod
+    def _score_or_default(outcome: Optional[CheckOutcome]) -> float:
+        if not outcome:
+            return 0.0
+        if outcome.score is not None:
+            return max(0.0, min(1.0, outcome.score))
+        return 1.0 if outcome.passed else 0.0
     
     def check_causal_coverage(
         self,
@@ -167,7 +211,8 @@ class ConsistencyChecker:
         if not E_bug.causal_paths:
             return CheckOutcome(
                 True,
-                "No causal paths in E_bug to verify"
+                "No causal paths in E_bug to verify",
+                score=1.0,
             )
         
         # Extract cause descriptions from causal paths
@@ -186,15 +231,21 @@ class ConsistencyChecker:
             if not (is_addressed or is_justified):
                 missing_causes.append(cause)
         
+        total_causes = max(1, len(bug_causes))
+        score = max(0.0, 1.0 - (len(missing_causes) / total_causes))
+
         if missing_causes:
             return CheckOutcome(
                 False,
-                f"Causes not addressed: {', '.join(missing_causes[:2])}. Patch must address or justify: {', '.join(missing_causes)}"
+                f"Causes not addressed: {', '.join(missing_causes[:2])}. Patch must address or justify: {', '.join(missing_causes)}",
+                score=score,
+                evidence={"missing_causes": missing_causes},
             )
         
         return CheckOutcome(
             True,
-            f"All {len(bug_causes)} causes addressed or justified"
+            f"All {len(bug_causes)} causes addressed or justified",
+            score=1.0,
         )
     
     def check_intervention_validity(
@@ -211,7 +262,8 @@ class ConsistencyChecker:
         if not code_diff.added_lines and not code_diff.modified_lines:
             return CheckOutcome(
                 False,
-                "No code changes detected in patch. Patch claims intervention but has no code changes"
+                "No code changes detected in patch. Patch claims intervention but has no code changes",
+                score=0.0,
             )
         
         # Check if intervention description matches code changes
@@ -228,12 +280,20 @@ class ConsistencyChecker:
         if not matched_keywords and intervention_keywords:
             return CheckOutcome(
                 False,
-                f"Intervention not found in code changes. Look for: {', '.join(intervention_keywords[:3])}"
+                f"Intervention not found in code changes. Look for: {', '.join(intervention_keywords[:3])}",
+                score=0.0,
+                evidence={"expected_keywords": intervention_keywords},
             )
-        
+        if intervention_keywords:
+            score = min(1.0, len(matched_keywords) / max(1, len(intervention_keywords)))
+        else:
+            score = 1.0
+
         return CheckOutcome(
             True,
-            f"Intervention validated: found {len(matched_keywords)} relevant changes"
+            f"Intervention validated: found {len(matched_keywords)} relevant changes",
+            score=score,
+            evidence={"matched_keywords": matched_keywords},
         )
     
     def check_logical_consistency(
@@ -258,7 +318,8 @@ class ConsistencyChecker:
         if "false" in patch_effect.after.lower():
             return CheckOutcome(
                 True,
-                "Patch effect analysis shows V_bug = false"
+                "Patch effect analysis shows V_bug = false",
+                score=1.0,
             )
         
         # Try SMT-based verification if Z3 is available
@@ -276,12 +337,14 @@ class ConsistencyChecker:
         if any(word in reasoning for word in ["false", "unsatisfiable", "prevented", "impossible"]):
             return CheckOutcome(
                 True,
-                "Reasoning indicates vulnerability is eliminated"
+                "Reasoning indicates vulnerability is eliminated",
+                score=0.7,
             )
         
         return CheckOutcome(
             False,
-            "Cannot verify V_bug becomes false. Consider strengthening the patch or intervention"
+            "Cannot verify V_bug becomes false. Consider strengthening the patch or intervention",
+            score=0.0,
         )
     
     def check_completeness(
@@ -294,7 +357,7 @@ class ConsistencyChecker:
         Verify that all causal paths identified in E_bug are disrupted.
         """
         if not E_bug.causal_paths:
-            return CheckOutcome(True, "No causal paths to verify")
+            return CheckOutcome(True, "No causal paths to verify", score=1.0)
         
         undisrupted_paths = []
         for path in E_bug.causal_paths:
@@ -307,15 +370,21 @@ class ConsistencyChecker:
             if not is_disrupted:
                 undisrupted_paths.append(path.description)
         
+        total_paths = max(1, len(E_bug.causal_paths))
+        score = max(0.0, 1.0 - (len(undisrupted_paths) / total_paths))
+
         if undisrupted_paths:
             return CheckOutcome(
                 False,
-                f"Paths not disrupted: {', '.join(undisrupted_paths[:2])}. Ensure patch breaks these paths: {', '.join(undisrupted_paths)}"
+                f"Paths not disrupted: {', '.join(undisrupted_paths[:2])}. Ensure patch breaks these paths: {', '.join(undisrupted_paths)}",
+                score=score,
+                evidence={"undisrupted_paths": undisrupted_paths},
             )
         
         return CheckOutcome(
             True,
-            f"All {len(E_bug.causal_paths)} causal paths disrupted"
+            f"All {len(E_bug.causal_paths)} causal paths disrupted",
+            score=1.0,
         )
     
     def _extract_keywords(self, text: str) -> List[str]:
@@ -380,11 +449,17 @@ class ConsistencyChecker:
 
             # Check if vulnerability is still satisfiable
             result = solver.check()
+            evidence = {
+                "bug_smt": getattr(E_bug, "smt_artifact", ""),
+                "patch_smt": getattr(E_patch, "smt_artifact", ""),
+            }
 
             if result == unsat:
                 return CheckOutcome(
                     True,
-                    "SMT solver confirms V_bug is unsatisfiable after intervention"
+                    "SMT solver confirms V_bug is unsatisfiable after intervention",
+                    score=1.0,
+                    evidence=evidence,
                 )
             else:
                 # Satisfiable or unknown (timeout)
@@ -393,7 +468,9 @@ class ConsistencyChecker:
                     return None
                 return CheckOutcome(
                     False,
-                    "SMT solver found V_bug may still be satisfiable. Strengthen the intervention or patch"
+                    "SMT solver found V_bug may still be satisfiable. Strengthen the intervention or patch",
+                    score=0.0,
+                    evidence=evidence,
                 )
 
         except Exception:
@@ -703,15 +780,20 @@ class ConsistencyChecker:
             checks_failed.append(f'causal_structure: {causal_result[1]}')
 
         # Overall: require at least 2 out of 3 checks to pass
+        score = len(checks_passed) / 3
         if len(checks_passed) >= 2:
             return CheckOutcome(
                 True,
-                f"E_bug aligns with ground truth ({len(checks_passed)}/3 checks passed: {', '.join(checks_passed)})"
+                f"E_bug aligns with ground truth ({len(checks_passed)}/3 checks passed: {', '.join(checks_passed)})",
+                score=score,
+                evidence={"passed": checks_passed, "failed": checks_failed},
             )
         else:
             return CheckOutcome(
                 False,
-                f"E_bug alignment insufficient ({len(checks_passed)}/3 checks passed). Failed checks: {'; '.join(checks_failed)}"
+                f"E_bug alignment insufficient ({len(checks_passed)}/3 checks passed). Failed checks: {'; '.join(checks_failed)}",
+                score=score,
+                evidence={"passed": checks_passed, "failed": checks_failed},
             )
 
     def _check_location_alignment(
@@ -876,7 +958,7 @@ class ConsistencyChecker:
             return CheckOutcome(
                 True,
                 "No ground truth available for patch effectiveness check",
-                None
+                score=0.5,
             )
 
         if not vuln_removed:
@@ -886,7 +968,8 @@ class ConsistencyChecker:
                 False,
                 "Ground truth verification: vulnerability NOT removed by patch. "
                 "Patch does not effectively eliminate the vulnerability. "
-                "Review the intervention and strengthen the fix."
+                "Review the intervention and strengthen the fix.",
+                score=0.0,
             )
 
         # Check if patch is semantically correct
@@ -894,7 +977,8 @@ class ConsistencyChecker:
         if patch_correct is False:
             return CheckOutcome(
                 False,
-                "Ground truth verification: patch is semantically incorrect. Patch may introduce bugs or break functionality"
+                "Ground truth verification: patch is semantically incorrect. Patch may introduce bugs or break functionality",
+                score=0.0,
             )
 
         # Check if patch has side effects
@@ -902,12 +986,14 @@ class ConsistencyChecker:
         if has_side_effects:
             return CheckOutcome(
                 False,
-                "Ground truth verification: patch has unintended side effects. Review patch for regressions or functional breaks"
+                "Ground truth verification: patch has unintended side effects. Review patch for regressions or functional breaks",
+                score=0.0,
             )
 
         # All ground truth checks passed
         return CheckOutcome(
             True,
             "Ground truth verification: vulnerability successfully removed, "
-            "patch is correct and has no side effects"
+            "patch is correct and has no side effects",
+            score=1.0,
         )

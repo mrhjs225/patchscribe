@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -24,6 +24,7 @@ class Stage1Data:
     scm: StructuralCausalModel
     intervention: InterventionSpec
     e_bug: FormalBugExplanation
+    analysis_stats: Dict[str, object] = field(default_factory=dict)
 
     def to_serializable(self) -> Dict[str, object]:
         return {
@@ -34,6 +35,7 @@ class Stage1Data:
             "scm": self.scm.as_dict(),
             "intervention": self.intervention.to_dict(),
             "E_bug": self.e_bug.as_dict(),
+            "analysis_stats": self.analysis_stats,
         }
 
 
@@ -102,6 +104,7 @@ class Stage1Cache:
             scm = StructuralCausalModel.from_dict(payload.get("scm") or {})
             intervention = InterventionSpec.from_dict(payload.get("intervention") or {})
             e_bug = FormalBugExplanation.from_dict(payload.get("E_bug") or {})
+            stats = payload.get("analysis_stats") or {}
         except Exception:
             return None
         return Stage1Data(
@@ -110,4 +113,5 @@ class Stage1Cache:
             scm=scm,
             intervention=intervention,
             e_bug=e_bug,
+            analysis_stats=stats,
         )

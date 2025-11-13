@@ -15,6 +15,7 @@ class SCMVariable:
     name: str
     var_type: str  # "bool", "int", "pointer"
     domain: List[str] = field(default_factory=list)
+    identifier: str = ""
 
     @classmethod
     def from_dict(cls, data: Dict[str, object]) -> "SCMVariable":
@@ -22,6 +23,7 @@ class SCMVariable:
             name=data.get("name", ""),
             var_type=data.get("var_type", "unknown"),
             domain=list(data.get("domain", [])),
+            identifier=data.get("identifier", ""),
         )
 
 
@@ -80,9 +82,12 @@ class SCMBuilder:
     def _define_variables(self) -> None:
         for node in self.graph.nodes.values():
             var_name = self._variable_name_semantic(node)
+            metadata = node.metadata or {}
             self.model.variables[var_name] = SCMVariable(
                 name=var_name,
-                var_type=self._infer_type(node.node_type),
+                var_type=metadata.get("datatype") or self._infer_type(node.node_type),
+                domain=list(metadata.get("value_range") or []),
+                identifier=metadata.get("identifier") or var_name,
             )
 
     def _create_equations(self) -> None:

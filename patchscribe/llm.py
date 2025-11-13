@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 from urllib.parse import urljoin
 
 if TYPE_CHECKING:
@@ -158,6 +159,7 @@ class LLMClient:
 
         # Initialize session with connection pooling
         self._session = self._create_session() if requests is not None else None
+        self._telemetry_hooks: List[Callable[[Dict[str, object]], None]] = []
 
     def _create_session(self):
         """Create a requests session with connection pooling and retry logic"""
@@ -431,6 +433,11 @@ class LLMClient:
 
         return results
 
+    def register_telemetry_hook(self, callback: Callable[[Dict[str, object]], None]) -> None:
+        """Register callback to receive telemetry for each LLM request."""
+        if callable(callback):
+            self._telemetry_hooks.append(callback)
+
     def _post_chat(self, messages: List[Dict[str, str]], *, temperature: float) -> str:
         payload = self._build_payload(messages, temperature=temperature)
 
@@ -438,6 +445,7 @@ class LLMClient:
         http_client = self._session if self._session is not None else requests
 
         try:
+            start = time.time()
             response = http_client.post(
                 self.config.endpoint,
                 headers=self._headers(),
@@ -451,6 +459,15 @@ class LLMClient:
         content = self._extract_content(data)
         if not content:
             raise LLMUnavailable("LLM response missing content")
+        duration_ms = (time.time() - start) * 1000.0
+        telemetry_payload = {
+            "timestamp": time.time(),
+            "model": self.config.model,
+            "provider": self.config.provider,
+            "duration_ms": duration_ms,
+        }
+        telemetry_payload.update(self._extract_usage(data))
+        self._emit_telemetry(telemetry_payload)
         return content
 
     @staticmethod
@@ -573,6 +590,27 @@ class LLMClient:
             if self.config.max_tokens is not None:
                 payload["max_tokens"] = self.config.max_tokens
         return payload
+
+    def _emit_telemetry(self, payload: Dict[str, object]) -> None:
+        if not self._telemetry_hooks:
+            return
+        for hook in list(self._telemetry_hooks):
+            try:
+                hook(payload)
+            except Exception:
+                continue
+
+    @staticmethod
+    def _extract_usage(data: Dict[str, object]) -> Dict[str, object]:
+        usage = data.get("usage") or {}
+        prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
+        completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens")
+        total_tokens = usage.get("total_tokens")
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
 
     def _extract_content(self, data: Dict[str, object]) -> Optional[str]:
         if self.config.provider == "anthropic":

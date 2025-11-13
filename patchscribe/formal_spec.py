@@ -5,6 +5,7 @@ to provide complete, machine-checkable vulnerability specifications.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional
 
@@ -21,6 +22,7 @@ class VariableSpec:
     meaning: str
     code_location: str
     domain: List[str] = field(default_factory=list)
+    identifier: str = ""
     
     def as_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
@@ -34,6 +36,7 @@ class VariableSpec:
             meaning=data.get("meaning", ""),
             code_location=data.get("code_location", "Unknown"),
             domain=list(data.get("domain", [])),
+            identifier=data.get("identifier", ""),
         )
 
 
@@ -111,6 +114,8 @@ class FormalBugExplanation:
     preconditions: List[str] = field(default_factory=list)
     postconditions: List[str] = field(default_factory=list)
     assertions: List[Assertion] = field(default_factory=list)
+    smt_artifact: str = ""
+    json_artifact: Dict[str, object] = field(default_factory=dict)
     
     def as_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
@@ -129,7 +134,9 @@ class FormalBugExplanation:
             'must_preserve': self.must_preserve,
             'preconditions': self.preconditions,
             'postconditions': self.postconditions,
-            'assertions': [a.as_dict() for a in self.assertions]
+            'assertions': [a.as_dict() for a in self.assertions],
+            'smt_artifact': self.smt_artifact,
+            'json_artifact': self.json_artifact,
         }
 
     @classmethod
@@ -165,6 +172,8 @@ class FormalBugExplanation:
             preconditions=list(data.get("preconditions", [])),
             postconditions=list(data.get("postconditions", [])),
             assertions=assertions,
+            smt_artifact=data.get("smt_artifact", ""),
+            json_artifact=data.get("json_artifact") or {},
         )
 
 
@@ -186,6 +195,7 @@ class InterventionDescription:
     formal: str  # "do(Variable = value)"
     affected_variables: List[str]
     description: str
+    do_expression: str = ""
     
     def as_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
@@ -232,6 +242,7 @@ class FormalPatchExplanation:
     # Verification properties
     postconditions: List[str]
     new_assertions: List[str]
+    smt_artifact: str = ""
     
     def as_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
@@ -246,7 +257,8 @@ class FormalPatchExplanation:
             'mechanism': self.mechanism,
             'consequence': self.consequence,
             'postconditions': self.postconditions,
-            'new_assertions': self.new_assertions
+            'new_assertions': self.new_assertions,
+            'smt_artifact': self.smt_artifact,
         }
 
 
@@ -271,7 +283,8 @@ def generate_E_bug(
             var_type=scm_var.var_type,
             meaning=node.description if node else "Unknown",
             code_location=f"line {node.location}" if node and node.location else "Unknown",
-            domain=scm_var.domain
+            domain=scm_var.domain,
+            identifier=scm_var.identifier or (node.metadata.get("identifier") if node and node.metadata else ""),
         )
     
     # Extract causal paths from PCG
@@ -305,7 +318,7 @@ def generate_E_bug(
         pcg, scm, intervention_spec, vuln_info
     )
 
-    return FormalBugExplanation(
+    bug_spec = FormalBugExplanation(
         formal_condition=f"V_bug ⟺ {scm.vulnerable_condition or 'True'}",
         variables=variables,
         description=description,
@@ -328,6 +341,9 @@ def generate_E_bug(
         ],
         assertions=assertions
     )
+    bug_spec.smt_artifact = _build_bug_smt_artifact(variables, scm.vulnerable_condition)
+    bug_spec.json_artifact = _build_bug_json_artifact(variables, scm, intervention_spec)
+    return bug_spec
 
 
 def generate_E_patch(
@@ -383,7 +399,7 @@ def generate_E_patch(
         f"assert({post})" for post in postconditions
     ]
     
-    return FormalPatchExplanation(
+    patch_spec = FormalPatchExplanation(
         code_diff=code_diff,
         intervention=intervention,
         effect_on_Vbug=effect_analysis,
@@ -396,6 +412,8 @@ def generate_E_patch(
         postconditions=postconditions,
         new_assertions=new_assertions
     )
+    patch_spec.smt_artifact = _build_patch_smt_artifact(E_bug, effect_analysis, intervention)
+    return patch_spec
 
 
 def _extract_causal_paths(pcg: ProgramCausalGraph) -> List[CausalPath]:
@@ -458,11 +476,57 @@ def _parse_diff(diff: str) -> CodeDiff:
     if not diff:
         return CodeDiff(added, modified, deleted)
     
-    for line in diff.splitlines():
-        if line.startswith("+") and not line.startswith("+++"):
-            added.append({"code": line[1:].strip()})
-        elif line.startswith("-") and not line.startswith("---"):
-            deleted.append({"code": line[1:].strip()})
+    old_line = 0
+    new_line = 0
+    pending_delete = None
+    hunk_pattern = re.compile(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+    for raw_line in diff.splitlines():
+        if raw_line.startswith("@@"):
+            match = hunk_pattern.match(raw_line)
+            if match:
+                old_line = int(match.group(1))
+                new_line = int(match.group(2))
+            pending_delete = None
+            continue
+
+        if raw_line.startswith("+") and not raw_line.startswith("+++"):
+            code = raw_line[1:].rstrip()
+            if pending_delete:
+                modified.append(
+                    {
+                        "before": pending_delete["code"],
+                        "after": code,
+                        "old_line": pending_delete["line"],
+                        "new_line": new_line,
+                    }
+                )
+                pending_delete = None
+            else:
+                added.append({"code": code, "line": new_line})
+            new_line += 1
+            continue
+
+        if raw_line.startswith("-") and not raw_line.startswith("---"):
+            if pending_delete:
+                deleted.append(pending_delete)
+            pending_delete = {"code": raw_line[1:].rstrip(), "line": old_line}
+            old_line += 1
+            continue
+
+        if pending_delete:
+            deleted.append(pending_delete)
+            pending_delete = None
+
+        if raw_line.startswith(" "):
+            old_line += 1
+            new_line += 1
+        elif raw_line.startswith("\\"):
+            # No line number change for diff metadata
+            continue
+
+    if pending_delete:
+        deleted.append(pending_delete)
     
     return CodeDiff(added, modified, deleted)
 
@@ -518,7 +582,8 @@ def _identify_intervention(
     return InterventionDescription(
         formal=formal_intervention,
         affected_variables=affected_vars,
-        description=description
+        description=description,
+        do_expression=formal_intervention,
     )
 
 
@@ -689,6 +754,130 @@ def _derive_required_interventions_from_paths(
             break
 
     return interventions
+
+
+def _build_bug_smt_artifact(
+    variables: Dict[str, VariableSpec],
+    vulnerable_condition: str,
+) -> str:
+    condition = (vulnerable_condition or "").strip()
+    if not condition:
+        return ""
+    decls = _build_smt_declarations(variables)
+    smt_condition = _condition_to_smt(condition)
+    lines = ["(set-logic HORN)"]
+    lines.extend(decls)
+    lines.append(f"(assert {smt_condition})")
+    lines.append("(check-sat)")
+    return "\n".join(lines)
+
+
+def _build_patch_smt_artifact(
+    E_bug: FormalBugExplanation,
+    effect: EffectAnalysis,
+    intervention: InterventionDescription,
+) -> str:
+    bug_condition = E_bug.formal_condition or ""
+    if "⟺" in bug_condition:
+        bug_condition = bug_condition.split("⟺", 1)[1].strip()
+    bug_condition = bug_condition or "True"
+    patched_condition = effect.after or "False"
+    decls = _build_smt_declarations(E_bug.variables)
+    bug_expr = _condition_to_smt(bug_condition)
+    patched_expr = _condition_to_smt(patched_condition)
+    lines = ["(set-logic HORN)"]
+    lines.extend(decls)
+    if intervention.do_expression or intervention.formal:
+        lines.append(f"; intervention {intervention.do_expression or intervention.formal}")
+    lines.append(f"(assert {bug_expr})")
+    lines.append(f"(assert (not {patched_expr}))")
+    lines.append("(check-sat)")
+    return "\n".join(lines)
+
+
+def _build_bug_json_artifact(
+    variables: Dict[str, VariableSpec],
+    scm: StructuralCausalModel,
+    intervention_spec: InterventionSpec,
+) -> Dict[str, object]:
+    return {
+        "variables": {
+            name: {
+                "identifier": spec.identifier or name,
+                "type": spec.var_type,
+                "domain": spec.domain,
+                "location": spec.code_location,
+            }
+            for name, spec in variables.items()
+        },
+        "equations": [eq.__dict__ for eq in scm.equations],
+        "vulnerable_condition": scm.vulnerable_condition,
+        "interventions": [item.to_dict() for item in intervention_spec.interventions],
+    }
+
+
+def _build_smt_declarations(variables: Dict[str, VariableSpec]) -> List[str]:
+    decls: List[str] = []
+    for name, spec in variables.items():
+        sort = "Bool"
+        if spec.var_type in {"int", "size"}:
+            sort = "Int"
+        elif spec.var_type == "pointer":
+            sort = "Int"
+        decls.append(f"(declare-const {name} {sort})")
+    return decls
+
+
+def _condition_to_smt(condition: str) -> str:
+    expr = _normalize_boolean_expr(condition)
+    if not expr:
+        return "true"
+    if expr.startswith("(") and expr.endswith(")"):
+        return _condition_to_smt(expr[1:-1])
+    if expr.upper().startswith("NOT "):
+        return f"(not {_condition_to_smt(expr[4:].strip())})"
+
+    for operator, smt_op in ((" OR ", "or"), (" AND ", "and")):
+        parts = _split_top_level(expr, operator.strip())
+        if len(parts) > 1:
+            smt_parts = " ".join(_condition_to_smt(part) for part in parts)
+            return f"({smt_op} {smt_parts})"
+
+    if " " in expr:
+        return "true"
+    return expr
+
+
+def _split_top_level(expression: str, operator: str) -> List[str]:
+    op = f" {operator} "
+    expr_upper = expression.upper()
+    parts: List[str] = []
+    depth = 0
+    start = 0
+    i = 0
+    while i <= len(expr_upper) - len(op):
+        ch = expr_upper[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        if depth == 0 and expr_upper[i : i + len(op)] == op:
+            parts.append(expression[start:i])
+            start = i + len(op)
+            i += len(op)
+            continue
+        i += 1
+    parts.append(expression[start:])
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _normalize_boolean_expr(expr: str) -> str:
+    expr = expr.replace("&&", " AND ").replace("||", " OR ").replace("!", " NOT ")
+    expr = re.sub(r"\bAND\b", " AND ", expr, flags=re.IGNORECASE)
+    expr = re.sub(r"\bOR\b", " OR ", expr, flags=re.IGNORECASE)
+    expr = re.sub(r"\bNOT\b", " NOT ", expr, flags=re.IGNORECASE)
+    expr = re.sub(r"\s+", " ", expr)
+    return expr.strip()
 
 
 def _translate_intervention_to_requirement(
