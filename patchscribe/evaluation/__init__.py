@@ -1,4 +1,9 @@
 """Evaluation module for PatchScribe."""
+
+# Import Evaluator from evaluator.py in this package
+from .evaluator import Evaluator, EvaluationReport, CaseEvaluation
+
+# Import manual rubric components
 from .manual_rubric import (
     EvaluationRubric,
     ManualEvaluation,
@@ -11,6 +16,11 @@ from .manual_rubric import (
 )
 
 __all__ = [
+    # From evaluator.py
+    'Evaluator',
+    'EvaluationReport',
+    'CaseEvaluation',
+    # From manual_rubric.py
     'EvaluationRubric',
     'ManualEvaluation',
     'EvaluationDimension',

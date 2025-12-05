@@ -77,6 +77,9 @@ class InterventionPlanner:
     def __init__(self, graph: ProgramCausalGraph, model: StructuralCausalModel) -> None:
         self.graph = graph
         self.model = model
+        metadata = getattr(model, "metadata", {}) or {}
+        template_bindings = metadata.get("template_bindings") or {}
+        self.template_bindings: Dict[str, str] = dict(template_bindings)
 
     def compute(self) -> InterventionSpec:
         vuln_node = self._find_vulnerability_node()
@@ -134,9 +137,11 @@ class InterventionPlanner:
             blockers = _compute_blockers(ast)
         return _prune_supersets(blockers)
 
-    @staticmethod
-    def _node_from_variable(variable: str) -> str:
+    def _node_from_variable(self, variable: str) -> str:
         """Extract node ID from variable name"""
+        binding = self.template_bindings.get(variable)
+        if binding:
+            return binding
         # Handle both old format (V_p1) and new semantic format (null_check_authkey_p1)
         if variable.startswith("V_"):
             return variable[2:]

@@ -63,6 +63,7 @@ class PCGBuilder:
         )
         self._strict_analysis = self.config.strict_dependencies and not allow_relaxed
         self._ensure_dependencies()
+        self.absence_labels = self._normalize_absence_labels()
 
     def build(self) -> Tuple[ProgramCausalGraph, Dict[str, object]]:
         # Step 1: LLVM backward slicing (if enabled and available)
@@ -94,7 +95,11 @@ class PCGBuilder:
         angr_result = AngrExplorer(self.program).run()
         absence_result: AbsenceAnalysisResult | None = None
         if self.config.enable_absence_detection:
-            absence_result = AbsenceAnalyzer(self.program, self.vuln_info["location"]).run()
+            absence_result = AbsenceAnalyzer(
+                self.program,
+                self.vuln_info["location"],
+                expected_patterns=self.absence_labels,
+            ).run()
         graphs = [static.graph, ast_result.graph, dynamic.graph, symbolic.graph]
 
         # Add LLVM slice graph if available
@@ -143,6 +148,7 @@ class PCGBuilder:
                     1 for node in combined.nodes.values() if node.node_type == "missing_guard"
                 ),
             },
+            "absence_metrics": absence_result.metrics if absence_result else None,
         }
         return combined, metadata
 
@@ -561,3 +567,25 @@ class PCGBuilder:
         if line_number and 1 <= line_number <= len(self.lines):
             return self.lines[line_number - 1]
         return ""
+
+    def _normalize_absence_labels(self) -> List[str]:
+        labels = self.vuln_info.get("absence_labels")
+        normalized: List[str] = []
+        if not labels:
+            return normalized
+        if isinstance(labels, dict):
+            for pattern, count in labels.items():
+                if not isinstance(pattern, str):
+                    continue
+                repeats = 1
+                if isinstance(count, int) and count > 1:
+                    repeats = count
+                normalized.extend([pattern] * repeats)
+            return normalized
+        if isinstance(labels, (list, tuple, set)):
+            for entry in labels:
+                if isinstance(entry, str):
+                    normalized.append(entry)
+                elif isinstance(entry, dict) and isinstance(entry.get("pattern"), str):
+                    normalized.append(entry["pattern"])
+        return normalized

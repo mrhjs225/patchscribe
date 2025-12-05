@@ -10,6 +10,7 @@ MissingGuard node exists.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 import re
 from typing import Dict, Iterable, List, Sequence
@@ -47,6 +48,7 @@ class AbsenceFinding:
 class AbsenceAnalysisResult:
     graph: ProgramCausalGraph
     findings: List[AbsenceFinding]
+    metrics: Dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -382,12 +384,19 @@ class AbsenceAnalyzer:
     about absence predicates the same way they do about explicit operations.
     """
 
-    def __init__(self, program: str, vuln_line: int, window: int = 12) -> None:
+    def __init__(
+        self,
+        program: str,
+        vuln_line: int,
+        window: int = 12,
+        expected_patterns: Sequence[str] | None = None,
+    ) -> None:
         self.program = program
         self.lines = program.splitlines()
         self.vuln_line = max(1, vuln_line)
         self.window = max(4, window)
         self.seq: Dict[str, int] = {}
+        self.expected_patterns = self._normalize_expected(expected_patterns)
 
     def run(self) -> AbsenceAnalysisResult:
         graph = ProgramCausalGraph()
@@ -441,7 +450,8 @@ class AbsenceAnalyzer:
                     )
                 )
 
-        return AbsenceAnalysisResult(graph=graph, findings=findings)
+        metrics = self._compute_metrics(findings)
+        return AbsenceAnalysisResult(graph=graph, findings=findings, metrics=metrics)
 
     # ------------------------------------------------------------------ #
     # Helper methods
@@ -505,3 +515,59 @@ class AbsenceAnalyzer:
             }:
                 continue
             yield token
+
+    @staticmethod
+    def _normalize_expected(patterns: Sequence[str] | None) -> Counter:
+        counter: Counter[str] = Counter()
+        if not patterns:
+            return counter
+        for pattern in patterns:
+            if isinstance(pattern, str) and pattern:
+                counter[pattern] += 1
+        return counter
+
+    def _compute_metrics(self, findings: List[AbsenceFinding]) -> Dict[str, object]:
+        metrics = {
+            "total_findings": len(findings),
+            "unique_patterns": len({finding.pattern for finding in findings}),
+        }
+        if not self.expected_patterns:
+            metrics.update(
+                {
+                    "precision": None,
+                    "recall": None,
+                    "f1": None,
+                    "true_positive": 0,
+                    "false_positive": len(findings),
+                    "false_negative": 0,
+                    "labeled_support": 0,
+                }
+            )
+            return metrics
+
+        predictions = Counter(finding.pattern for finding in findings)
+        tp = sum(
+            min(count, predictions.get(pattern, 0))
+            for pattern, count in self.expected_patterns.items()
+        )
+        fp = len(findings) - tp
+        fn = sum(self.expected_patterns.values()) - tp
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if (precision + recall)
+            else 0.0
+        )
+        metrics.update(
+            {
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+                "true_positive": tp,
+                "false_positive": fp,
+                "false_negative": fn,
+                "labeled_support": sum(self.expected_patterns.values()),
+            }
+        )
+        return metrics

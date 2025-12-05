@@ -52,12 +52,24 @@ class PatchGenerator:
         self.prompt_options = prompt_options
 
     def generate(self, spec: InterventionSpec) -> PatchResult:
-        # Only attempt LLM-guided patch. If it fails, return noop.
+        """
+        Try multiple patch synthesis strategies.
+
+        Order: LLM-guided patch -> guard insertion -> canned mitigations.
+        """
         llm_result = self._try_llm_patch(spec)
         if llm_result:
             return llm_result
 
-        # LLM patch generation failed - return noop result.
+        guard_result = self._spec_guard_patch(spec)
+        if guard_result:
+            return guard_result
+
+        heuristic_result = self._apply_known_mitigations()
+        if heuristic_result:
+            return heuristic_result
+
+        # No viable strategy produced a change.
         return PatchResult(patched_code=self.program, diff="", applied_guards=[], method="noop")
 
     def _try_llm_patch(self, spec: InterventionSpec) -> PatchResult | None:

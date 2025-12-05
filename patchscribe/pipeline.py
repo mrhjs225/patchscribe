@@ -7,8 +7,9 @@ import hashlib
 import os
 from contextlib import nullcontext
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .consistency_checker import ConsistencyChecker, ConsistencyResult
 from .effect_model import PatchEffectAnalyzer
@@ -369,6 +370,12 @@ class PatchScribePipeline:
         consistency: ConsistencyResult | None = None
         first_attempt_success: bool | None = None
 
+        effect_vuln_info = {
+            "location": vuln_case.get("vuln_line"),
+            "cwe_id": vuln_case.get("cwe_id", "Unknown"),
+            "absence_labels": vuln_case.get("absence_labels"),
+        }
+
         for iteration_idx in range(max_iterations):
             generation_ctx = profiler.profile_phase("phase2_generation") if profiler else nullcontext()
             with generation_ctx:
@@ -380,6 +387,8 @@ class PatchScribePipeline:
                     original_condition=stage1.scm.vulnerable_condition,
                     patched_code=patch.patched_code,
                     signature=vuln_case.get("signature", ""),
+                    baseline_stage1=stage1,
+                    vuln_info=effect_vuln_info,
                 )
                 effect_dict = effect.as_dict()
                 e_patch = generate_E_patch(
@@ -392,7 +401,17 @@ class PatchScribePipeline:
                 )
 
             if self.consistency_checker:
-                consistency = self.consistency_checker.check(stage1.e_bug, e_patch)
+                ground_truth_context = self._build_consistency_ground_truth(
+                    vuln_case=vuln_case,
+                    stage1=stage1,
+                    patch=patch,
+                    effect=effect_dict,
+                )
+                consistency = self.consistency_checker.check(
+                    stage1.e_bug,
+                    e_patch,
+                    ground_truth=ground_truth_context,
+                )
             else:
                 consistency = None
 
@@ -450,6 +469,80 @@ class PatchScribePipeline:
             parts.append(consistency.completeness.feedback)
         return " ".join(part for part in parts if part)
 
+    def _build_consistency_ground_truth(
+        self,
+        *,
+        vuln_case: Dict[str, object],
+        stage1: Stage1Data,
+        patch: PatchResult,
+        effect: Dict[str, object],
+    ) -> Optional[Dict[str, object]]:
+        """
+        Assemble ground-truth signals for the consistency checker.
+
+        Combines dataset metadata, Stage-1 artifacts, and patch similarity
+        against any reference implementation bundled with the dataset.
+        """
+        ground_truth: Dict[str, object] = {}
+
+        for key in ("verification", "ground_truth_meta"):
+            meta = vuln_case.get(key)
+            if isinstance(meta, dict):
+                ground_truth.update(meta)
+
+        case_identifier = (
+            vuln_case.get("id")
+            or vuln_case.get("case_id")
+            or vuln_case.get("filename")
+        )
+        line_no = vuln_case.get("vuln_line")
+        if isinstance(line_no, int) and line_no > 0:
+            if isinstance(case_identifier, str) and case_identifier.strip():
+                location = f"{case_identifier.strip()} line {line_no}"
+            else:
+                location = f"line {line_no}"
+            ground_truth.setdefault("vulnerability_location", location)
+
+        cwe_id = vuln_case.get("cwe_id")
+        if isinstance(cwe_id, str) and cwe_id.strip():
+            ground_truth.setdefault("vulnerability_type", cwe_id.strip())
+
+        vuln_condition = stage1.scm.vulnerable_condition or getattr(stage1.e_bug, "formal_condition", "")
+        if vuln_condition:
+            ground_truth.setdefault("vulnerability_condition", vuln_condition)
+
+        causes: List[str] = []
+        for path in getattr(stage1.e_bug, "causal_paths", []) or []:
+            description = getattr(path, "description", "") or ""
+            if description:
+                causes.append(description)
+        if causes:
+            deduped = list(dict.fromkeys(causes))
+            ground_truth["expected_causes"] = deduped
+
+        removed = effect.get("vulnerability_removed") if isinstance(effect, dict) else None
+        if removed is not None:
+            ground_truth["vulnerability_removed"] = bool(removed)
+
+        reference_patch = vuln_case.get("ground_truth")
+        if isinstance(reference_patch, str) and reference_patch.strip():
+            similarity = self._compute_patch_similarity(patch.patched_code, reference_patch)
+            ground_truth["reference_patch_similarity"] = similarity
+            if "patch_correct" not in ground_truth:
+                ground_truth["patch_correct"] = similarity >= 0.75
+            if "has_side_effects" not in ground_truth:
+                ground_truth["has_side_effects"] = similarity < 0.35
+
+        return ground_truth or None
+
+    @staticmethod
+    def _compute_patch_similarity(candidate: str, reference: str) -> float:
+        """Return a normalized similarity score between two code snippets."""
+        if not candidate and not reference:
+            return 1.0
+        matcher = SequenceMatcher(None, candidate.splitlines(), reference.splitlines())
+        return matcher.ratio()
+
     def _resolve_patch_for_explanations(
         self,
         *,
@@ -475,6 +568,12 @@ class PatchScribePipeline:
                 original_condition=stage1.scm.vulnerable_condition,
                 patched_code=ground_truth_code,
                 signature=vuln_case.get("signature", ""),
+                baseline_stage1=stage1,
+                vuln_info={
+                    "location": vuln_case.get("vuln_line"),
+                    "cwe_id": vuln_case.get("cwe_id", "Unknown"),
+                    "absence_labels": vuln_case.get("absence_labels"),
+                },
             ).as_dict()
             regenerated_e_patch = generate_E_patch(
                 ground_truth_code,
@@ -581,10 +680,11 @@ class PatchScribePipeline:
         vuln_info: Dict[str, object],
     ) -> Stage1Data:
         pcg, diagnostics = PCGBuilder(program, vuln_info, self.config).build()
-        scm = SCMBuilder(pcg).derive()
+        scm_builder = SCMBuilder(pcg, vuln_info.get("cwe_id"))
+        scm = scm_builder.derive()
         intervention = InterventionPlanner(pcg, scm).compute()
         e_bug = generate_E_bug(pcg, scm, intervention, vuln_info)
-        stats = self._collect_analysis_stats(pcg, diagnostics)
+        stats = self._collect_analysis_stats(pcg, diagnostics, scm_metrics=scm_builder.metrics)
         return Stage1Data(
             pcg=pcg,
             diagnostics=diagnostics,
@@ -620,14 +720,18 @@ class PatchScribePipeline:
     def _collect_analysis_stats(
         pcg: ProgramCausalGraph,
         diagnostics: Dict[str, object],
+        scm_metrics: Dict[str, object] | None = None,
     ) -> Dict[str, object]:
         summary = diagnostics.get("pcg_summary") or {}
         absence = diagnostics.get("absence_findings") or []
+        absence_metrics = diagnostics.get("absence_metrics")
         return {
             "pcg_nodes": summary.get("node_count", len(pcg.nodes)),
             "pcg_edges": summary.get("edge_count", len(pcg.edges)),
             "missing_guard_nodes": summary.get("missing_guard_count", 0),
             "absence_findings": absence,
+            "absence_metrics": absence_metrics,
+            "scm_template": scm_metrics or {},
         }
 
     def _handle_llm_telemetry(self, record: Dict[str, object]) -> None:

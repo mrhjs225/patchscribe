@@ -13,8 +13,8 @@ try:
 except ImportError:
     tqdm = None
 
-from .pipeline import PatchScribePipeline, PipelineArtifacts
-from .llm import LLMConfig
+from ..pipeline import PatchScribePipeline, PipelineArtifacts
+from ..llm import LLMConfig
 
 
 @dataclass

@@ -39,37 +39,33 @@ from patchscribe.llm import (
     DEFAULT_OPENAI_ENDPOINT,
     PromptOptions,
 )
+from patchscribe.utils.random_state import seed_everything
 OPENAI_MODELS = [
-    "gpt-5-mini",
-    "gpt-4.1-mini",
+    "gpt-5-mini"
 ]
 ANTHROPIC_MODELS = [
-    "claude-3-5-haiku",
     "claude-haiku-4-5",
 ]
 GEMINI_MODELS = [
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
 ]
 
-DEFAULT_OPENAI_MODEL = OPENAI_MODELS[1]  # gpt-5-mini
+DEFAULT_OPENAI_MODEL = OPENAI_MODELS[0]  # gpt-5-mini
 DEFAULT_ANTHROPIC_MODEL = ANTHROPIC_MODELS[0]  # claude-haiku-4-5
 DEFAULT_ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 DEFAULT_LLM_MAX_TOKENS = 2048
 DEFAULT_GEMINI_MODEL = LLM_DEFAULT_GEMINI_MODEL
+DEFAULT_MODELS = "gpt-5-mini"
 
 CONCURRENCY_ALLOWED_MODELS = {
     'openai': {
         "gpt-5-mini",
-        "gpt-4.1-mini",
     },
     'anthropic': {
         "claude-haiku-4-5",
-        "claude-3-5-haiku",
     },
     'gemini': {
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
     },
 }
 
@@ -439,6 +435,7 @@ def run_single_evaluation(
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
     dataset_name: str = "",
+    seed: Optional[int] = None,
 ) -> Dict:
     """Run evaluation for a single model × condition"""
     from patchscribe.pipeline import PatchScribePipeline
@@ -527,6 +524,15 @@ def run_single_evaluation(
     )
     report = evaluator.run(cases)
     report_payload = report.as_dict()
+    metadata = report_payload.setdefault("metadata", {})
+    metadata.update({
+        "seed": seed,
+        "dataset": dataset_name,
+        "model": model_name,
+        "condition": condition,
+        "case_count": len(report_payload.get("cases", [])),
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    })
 
     prompt_snapshot = None
     if prompt_options is not None:
@@ -546,6 +552,7 @@ def run_single_evaluation(
         "max_tokens": max_tokens,
         "concurrency": concurrency,
         "consistency_check": final_consistency_check,
+        "seed": seed,
         "stage1_cache": str(stage1_cache_dir) if stage1_cache_dir else None,
         "force_stage1_recompute": force_stage1_recompute,
         "prompt_options": prompt_snapshot,
@@ -628,6 +635,7 @@ def run_experiment(
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
     precompute_stage1_only: bool = False,
+    seed: Optional[int] = None,
 ):
     """Run integrated experiment
 
@@ -683,13 +691,15 @@ def run_experiment(
         results_summary = _run_experiment_parallel(
             cases, models, conditions, output_dir, llm_config,
             server_id, verbose, run_label, disable_consistency_check,
-            stage1_cache_dir, force_stage1_recompute, dataset_name=dataset
+            stage1_cache_dir, force_stage1_recompute, dataset_name=dataset,
+            seed=seed,
         )
     else:
         results_summary = _run_experiment_sequential(
             cases, models, conditions, output_dir, llm_config,
             server_id, verbose, run_label, disable_consistency_check,
-            stage1_cache_dir, force_stage1_recompute, dataset_name=dataset
+            stage1_cache_dir, force_stage1_recompute, dataset_name=dataset,
+            seed=seed,
         )
 
     # Generate incomplete patches (RQ2)
@@ -763,6 +773,7 @@ def _run_experiment_sequential(
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
     dataset_name: str = "",
+    seed: Optional[int] = None,
 ) -> List[Dict]:
     """Sequential processing mode (original behavior)"""
     results_summary = []
@@ -805,6 +816,7 @@ def _run_experiment_sequential(
                     verbose=verbose,
                     stage1_cache_dir=stage1_cache_dir,
                     force_stage1_recompute=force_stage1_recompute,
+                    seed=seed,
                 )
                 model_results['conditions'][condition] = {
                     'success_rate': result['metrics'].get('success_rate', 0),
@@ -849,6 +861,7 @@ def _run_experiment_parallel(
     stage1_cache_dir: Optional[Path] = None,
     force_stage1_recompute: bool = False,
     dataset_name: str = "",
+    seed: Optional[int] = None,
 ) -> List[Dict]:
     """Parallel processing mode: Process all (model, condition) combinations concurrently"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -910,6 +923,7 @@ def _run_experiment_parallel(
                 verbose=False,  # Turn off individual verbose during parallel execution
                 stage1_cache_dir=stage1_cache_dir,
                 force_stage1_recompute=force_stage1_recompute,
+                seed=seed,
             )
 
             with print_lock:
@@ -977,6 +991,120 @@ def _run_experiment_parallel(
                        for model_spec in models if (model_spec.split(':', 1)[1] if ':' in model_spec else model_spec) in results_dict]
 
     return results_summary
+
+
+def _run_cli_once(
+    args: argparse.Namespace,
+    *,
+    llm_config: Dict[str, object],
+    stage1_cache_dir: Optional[Path],
+    seed: int,
+    multi_seed: bool,
+    seed_index: int,
+    total_seeds: int,
+) -> None:
+    """Execute a single CLI run (potentially part of a seed suite)."""
+    llm_config_for_run = dict(llm_config)
+    seed_status = seed_everything(seed)
+    os.environ["PATCHSCRIBE_RUN_SEED"] = str(seed)
+
+    if not args.quiet:
+        banner = f"Seed {seed} ({seed_index + 1}/{total_seeds})" if multi_seed else f"Seed {seed}"
+        print_header(banner)
+        deterministic_components = [name for name, ok in seed_status.items() if ok]
+        if deterministic_components:
+            print(f"  Deterministic backends: {', '.join(deterministic_components)}")
+        else:
+            print("  Deterministic backends: python_random (fallback)")
+
+    effective_stage1_cache = stage1_cache_dir
+    if effective_stage1_cache and multi_seed:
+        effective_stage1_cache = effective_stage1_cache / f"seed{seed}"
+    if effective_stage1_cache:
+        effective_stage1_cache.mkdir(parents=True, exist_ok=True)
+
+    if args.quick:
+        models = args.models if args.models else select_default_models(args.llm_provider, quick=True)
+        conditions = args.conditions if args.conditions else ['c4']
+        limit = 3
+        offset = 0
+        output_dir = args.output if args.output else Path('results/quick_test')
+        server_id = None
+
+        print_header("Quick Test Mode")
+        print_llm_settings(llm_config_for_run)
+        print(f"  Testing 3 cases with {models[0]}, condition C4")
+
+    elif args.distributed:
+        server_id = int(args.distributed[0])
+        num_servers = int(args.distributed[1])
+        total_cases = int(args.distributed[2])
+
+        models = args.models if args.models else select_default_models(args.llm_provider)
+        conditions = args.conditions if args.conditions else ['c1', 'c2', 'c3', 'c4']
+
+        offset, limit = calculate_case_allocation(server_id, num_servers, total_cases)
+        output_dir = args.output if args.output else Path(f'results/server{server_id}')
+
+        print_header(f"Distributed Mode - Server {server_id}")
+        print_llm_settings(llm_config_for_run)
+        print(f"  Total servers: {num_servers}")
+        print(f"  Total cases: {total_cases}")
+        print(f"  This server: cases {offset} to {offset + limit - 1} ({limit} cases)")
+
+    else:
+        models = args.models if args.models else select_default_models(args.llm_provider)
+        conditions = args.conditions if args.conditions else ['c1', 'c2', 'c3', 'c4']
+        limit = args.limit
+        offset = args.offset
+        output_dir = args.output if args.output else Path('results/local')
+        server_id = None
+
+        print_header("Local Experiment Mode")
+        print_llm_settings(llm_config_for_run)
+        if limit:
+            print(f"  Processing {limit} cases")
+        else:
+            print(f"  Processing all cases from dataset")
+
+    if multi_seed:
+        output_dir = output_dir / f"seed{seed}"
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        run_experiment(
+            dataset=args.dataset,
+            models=models,
+            conditions=conditions,
+            output_dir=output_dir,
+            llm_config=llm_config_for_run,
+            start_index=offset,
+            limit=limit,
+            generate_incomplete=not args.skip_incomplete_patches,
+            server_id=server_id,
+            verbose=not args.quiet,
+            parallel_conditions=args.parallel_conditions,
+            disable_consistency_check=args.disable_consistency_check,
+            stage1_cache_dir=effective_stage1_cache,
+            force_stage1_recompute=args.refresh_stage1_cache,
+            precompute_stage1_only=args.precompute_stage1,
+            seed=seed,
+        )
+
+        if args.precompute_stage1:
+            print("\n[OK] Stage-1 caching completed successfully!\n")
+        else:
+            print("\n[OK] Experiment completed successfully!\n")
+
+    except KeyboardInterrupt:
+        print("\n\n[INTERRUPT] Experiment interrupted by user\n")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\n[ERROR] Experiment failed: {e}\n")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 def main():
@@ -1134,6 +1262,24 @@ def main():
         action='store_true',
         help='기존 Stage-1 캐시를 무시하고 재계산'
     )
+    # Reproducibility / seed controls
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        help='단일 실험 실행 시 사용할 랜덤 시드 (기본값: 42)'
+    )
+    parser.add_argument(
+        '--seed-suite',
+        nargs='+',
+        type=int,
+        help='지정된 시드들에 대해 순차적으로 실험 실행 (예: --seed-suite 42 123 7220)'
+    )
+    parser.add_argument(
+        '--triple-seed',
+        action='store_true',
+        help='논문에서 사용한 세 가지 시드(42, 123, 7220)로 연속 실행'
+    )
 
     # Output
     parser.add_argument(
@@ -1187,92 +1333,26 @@ def main():
         if auto_tokens:
             llm_config['max_tokens'] = auto_tokens
 
-    # Configure based on mode
-    if args.quick:
-        # Quick test mode
-        models = args.models if args.models else select_default_models(args.llm_provider, quick=True)
-        conditions = args.conditions if args.conditions else ['c4']
-        limit = 3
-        offset = 0
-        output_dir = args.output if args.output else Path('results/quick_test')
-        server_id = None
-
-        print_header("Quick Test Mode")
-        print_llm_settings(llm_config)
-        print(f"  Testing 3 cases with {models[0]}, condition C4")
-
-    elif args.distributed:
-        # Distributed mode
-        server_id = int(args.distributed[0])
-        num_servers = int(args.distributed[1])
-        total_cases = int(args.distributed[2])
-
-        models = args.models if args.models else select_default_models(args.llm_provider)
-        conditions = args.conditions if args.conditions else ['c1', 'c2', 'c3', 'c4']
-
-        # Calculate case allocation
-        offset, limit = calculate_case_allocation(server_id, num_servers, total_cases)
-
-        output_dir = args.output if args.output else Path(f'results/server{server_id}')
-
-        print_header(f"Distributed Mode - Server {server_id}")
-        print_llm_settings(llm_config)
-        print(f"  Total servers: {num_servers}")
-        print(f"  Total cases: {total_cases}")
-        print(f"  This server: cases {offset} to {offset + limit - 1} ({limit} cases)")
-
+    if args.seed_suite:
+        seed_values = [int(s) for s in args.seed_suite]
+    elif args.triple_seed:
+        seed_values = [42, 123, 7220]
     else:
-        # Local mode
-        models = args.models if args.models else select_default_models(args.llm_provider)
-        conditions = args.conditions if args.conditions else ['c1', 'c2', 'c3', 'c4']
-        limit = args.limit
-        offset = args.offset
-        output_dir = args.output if args.output else Path('results/local')
-        server_id = None
+        seed_values = [int(args.seed)]
 
-        print_header("Local Experiment Mode")
-        print_llm_settings(llm_config)
-        if limit:
-            print(f"  Processing {limit} cases")
-        else:
-            print(f"  Processing all cases from dataset")
+    total_seeds = len(seed_values)
+    multi_seed = total_seeds > 1
 
-    # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Run experiment
-    try:
-        run_experiment(
-            dataset=args.dataset,
-            models=models,
-            conditions=conditions,
-            output_dir=output_dir,
+    for idx, seed in enumerate(seed_values):
+        _run_cli_once(
+            args,
             llm_config=llm_config,
-            start_index=offset,
-            limit=limit,
-            generate_incomplete=not args.skip_incomplete_patches,
-            server_id=server_id,
-            verbose=not args.quiet,
-            parallel_conditions=args.parallel_conditions,
-            disable_consistency_check=args.disable_consistency_check,
             stage1_cache_dir=normalized_stage1_cache,
-            force_stage1_recompute=args.refresh_stage1_cache,
-            precompute_stage1_only=args.precompute_stage1,
+            seed=seed,
+            multi_seed=multi_seed,
+            seed_index=idx,
+            total_seeds=total_seeds,
         )
-
-        if args.precompute_stage1:
-            print("\n[OK] Stage-1 caching completed successfully!\n")
-        else:
-            print("\n[OK] Experiment completed successfully!\n")
-
-    except KeyboardInterrupt:
-        print("\n\n[INTERRUPT] Experiment interrupted by user\n")
-        sys.exit(130)
-    except Exception as e:
-        print(f"\n[ERROR] Experiment failed: {e}\n")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
 
 
 def _precompute_stage1_batch(

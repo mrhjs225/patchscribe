@@ -118,7 +118,7 @@ class ResultEvaluator:
         data['evaluation_metadata'] = {
             'input_file': str(input_file),
             'evaluation_timestamp': datetime.now().isoformat(),
-            'judge': 'gpt-5',
+            'judge': 'gpt-5-mini',
             'voting_method': 'single',
             'success_evaluated': not skip_success,
             'explanation_evaluated': not skip_explanation,

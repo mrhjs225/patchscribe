@@ -1,0 +1,380 @@
+{
+  "oob_memory": {
+    "cwes": ["CWE-125", "CWE-787", "CWE-120"],
+    "description": "Out-of-bounds read/write due to insufficient bounds enforcement.",
+    "variables": [
+      {
+        "name": "X_idx",
+        "var_type": "int",
+        "role": "exogenous",
+        "description": "Attacker-controlled index value",
+        "domain": ["attacker_input"]
+      },
+      {
+        "name": "X_len",
+        "var_type": "int",
+        "role": "exogenous",
+        "description": "Attacker-controlled length parameter",
+        "domain": ["attacker_input"]
+      },
+      {
+        "name": "C_buffer_size",
+        "var_type": "int",
+        "role": "endogenous",
+        "description": "Allocated buffer capacity"
+      },
+      {
+        "name": "C_bounds_check",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Presence of bounds validation guard"
+      },
+      {
+        "name": "C_idx_valid",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Index within valid memory range"
+      },
+      {
+        "name": "C_access_safe",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Whether the memory access is safe"
+      }
+    ],
+    "equations": [
+      {
+        "target": "C_idx_valid",
+        "expression": "(X_idx >= 0) && (X_idx < C_buffer_size)",
+        "description": "Index must fall inside the allocated buffer"
+      },
+      {
+        "target": "C_access_safe",
+        "expression": "C_bounds_check && C_idx_valid",
+        "description": "Safe access requires both guard and valid index"
+      },
+      {
+        "target": "V_bug",
+        "expression": "(!C_bounds_check) || (!C_idx_valid)",
+        "description": "Bug triggers when guard missing or index invalid"
+      }
+    ],
+    "vulnerable_condition": "(!C_bounds_check) || (!C_idx_valid)",
+    "bindings": {
+      "C_bounds_check": ["bound", "length", "size", "check", "len", "capacity"],
+      "C_idx_valid": ["index", "idx", "offset", "[", "]"],
+      "C_buffer_size": ["sizeof", "size", "capacity", "len"],
+      "C_access_safe": ["memcpy", "memmove", "strcpy", "copy", "access"]
+    },
+    "interventions": [
+      {
+        "variable": "C_bounds_check",
+        "description": "Insert guard `if (idx >= 0 && idx < size)` before memory access.",
+        "formal_do": "do(C_bounds_check = 1)"
+      },
+      {
+        "variable": "C_idx_valid",
+        "description": "Clamp user supplied index/length into valid range.",
+        "formal_do": "do(C_idx_valid = 1)"
+      },
+      {
+        "variable": "X_idx",
+        "description": "Sanitize attacker-controlled index at entry point.",
+        "formal_do": "do(X_idx = sanitize(X_idx))"
+      }
+    ]
+  },
+  "null_pointer": {
+    "cwes": ["CWE-476"],
+    "description": "NULL pointer dereference without guard.",
+    "variables": [
+      {
+        "name": "X_alloc_result",
+        "var_type": "pointer",
+        "role": "exogenous",
+        "description": "Result of allocation or external return"
+      },
+      {
+        "name": "C_null_check",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Presence of NULL validation"
+      },
+      {
+        "name": "C_ptr_valid",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Pointer value is not NULL"
+      },
+      {
+        "name": "C_deref_safe",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Dereference safe condition"
+      }
+    ],
+    "equations": [
+      {
+        "target": "C_ptr_valid",
+        "expression": "(X_alloc_result != NULL)",
+        "description": "Pointer validity requires successful allocation"
+      },
+      {
+        "target": "C_deref_safe",
+        "expression": "C_null_check && C_ptr_valid",
+        "description": "Dereference safe when guarded and valid"
+      },
+      {
+        "target": "V_bug",
+        "expression": "(!C_null_check) && (!C_ptr_valid)",
+        "description": "Bug occurs when dereference lacks guard and pointer may be NULL"
+      }
+    ],
+    "vulnerable_condition": "(!C_null_check) && (!C_ptr_valid)",
+    "bindings": {
+      "C_null_check": ["null", "NULL", "!ptr", "if (!", "== NULL"],
+      "C_ptr_valid": ["ptr", "pointer", "alloc", "malloc", "return"],
+      "C_deref_safe": ["*", "->", "deref", "use"]
+    },
+    "interventions": [
+      {
+        "variable": "C_null_check",
+        "description": "Add NULL guard `if (!ptr) return;` before dereference.",
+        "formal_do": "do(C_null_check = 1)"
+      },
+      {
+        "variable": "C_ptr_valid",
+        "description": "Ensure allocation failure paths handle NULL and propagate errors.",
+        "formal_do": "do(C_ptr_valid = 1)"
+      }
+    ]
+  },
+  "integer_overflow": {
+    "cwes": ["CWE-190"],
+    "description": "Integer overflow without overflow detection.",
+    "variables": [
+      {
+        "name": "X_operand_1",
+        "var_type": "int",
+        "role": "exogenous",
+        "description": "Attacker-controlled integer operand"
+      },
+      {
+        "name": "X_operand_2",
+        "var_type": "int",
+        "role": "exogenous",
+        "description": "Second operand"
+      },
+      {
+        "name": "C_overflow_check",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Presence of overflow guard"
+      },
+      {
+        "name": "C_result_valid",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Result within representable range"
+      }
+    ],
+    "equations": [
+      {
+        "target": "C_result_valid",
+        "expression": "(X_operand_1 + X_operand_2) <= TYPE_MAX",
+        "description": "Result must not exceed destination type bounds"
+      },
+      {
+        "target": "V_bug",
+        "expression": "(!C_overflow_check) && (!C_result_valid)",
+        "description": "Bug occurs if overflow guard absent and result can overflow"
+      }
+    ],
+    "vulnerable_condition": "(!C_overflow_check) && (!C_result_valid)",
+    "bindings": {
+      "C_overflow_check": ["overflow", "SIZE_MAX", "check", "if (a", "max"],
+      "C_result_valid": ["sum", "add", "+", "*", "size", "capacity"]
+    },
+    "interventions": [
+      {
+        "variable": "C_overflow_check",
+        "description": "Insert guard `if (a > MAX - b) handle_error();`.",
+        "formal_do": "do(C_overflow_check = 1)"
+      },
+      {
+        "variable": "C_result_valid",
+        "description": "Promote arithmetic to wider type / builtin checked addition.",
+        "formal_do": "do(C_result_valid = 1)"
+      }
+    ]
+  },
+  "memory_leak": {
+    "cwes": ["CWE-401"],
+    "description": "Allocated resources not released on all paths.",
+    "variables": [
+      {
+        "name": "X_alloc_request",
+        "var_type": "event",
+        "role": "exogenous",
+        "description": "Allocation request"
+      },
+      {
+        "name": "C_resource_acquired",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Resource allocated and owned"
+      },
+      {
+        "name": "C_cleanup_path",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Cleanup path covers all exits"
+      },
+      {
+        "name": "C_early_exit",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Early exit before cleanup"
+      }
+    ],
+    "equations": [
+      {
+        "target": "C_resource_acquired",
+        "expression": "(X_alloc_request = 1)",
+        "description": "Resource exists once allocation request executes"
+      },
+      {
+        "target": "C_cleanup_path",
+        "expression": "!(C_early_exit)",
+        "description": "Cleanup holds when no exit bypasses release"
+      },
+      {
+        "target": "V_bug",
+        "expression": "C_resource_acquired && !C_cleanup_path",
+        "description": "Leak occurs if resource acquired but cleanup missing"
+      }
+    ],
+    "vulnerable_condition": "C_resource_acquired && !C_cleanup_path",
+    "bindings": {
+      "C_resource_acquired": ["malloc", "calloc", "fopen", "socket", "new"],
+      "C_cleanup_path": ["free", "close", "cleanup", "goto cleanup", "return"],
+      "C_early_exit": ["return", "goto", "error", "fail"]
+    },
+    "interventions": [
+      {
+        "variable": "C_cleanup_path",
+        "description": "Ensure every exit path invokes cleanup (RAII/goto cleanup).",
+        "formal_do": "do(C_cleanup_path = 1)"
+      }
+    ]
+  },
+  "uninitialized": {
+    "cwes": ["CWE-457"],
+    "description": "Use of uninitialized variables.",
+    "variables": [
+      {
+        "name": "X_decl",
+        "var_type": "event",
+        "role": "exogenous",
+        "description": "Variable declaration event"
+      },
+      {
+        "name": "C_initialized",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Variable has been initialized"
+      },
+      {
+        "name": "C_init_check",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Presence of initialization guard"
+      },
+      {
+        "name": "C_use_safe",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Usage guarded against uninitialized state"
+      }
+    ],
+    "equations": [
+      {
+        "target": "C_initialized",
+        "expression": "(X_decl = 1) && assignment_executed",
+        "description": "Initialization requires assignment after declaration"
+      },
+      {
+        "target": "C_use_safe",
+        "expression": "C_initialized || C_init_check",
+        "description": "Usage safe when variable initialized or guarded"
+      },
+      {
+        "target": "V_bug",
+        "expression": "(!C_initialized) && (!C_init_check)",
+        "description": "Bug occurs if variable neither initialized nor checked"
+      }
+    ],
+    "vulnerable_condition": "(!C_initialized) && (!C_init_check)",
+    "bindings": {
+      "C_initialized": ["=", "memset", "init", "initialize"],
+      "C_init_check": ["initialized", "is_valid", "check", "flag"],
+      "C_use_safe": ["use", "return", "consume"]
+    },
+    "interventions": [
+      {
+        "variable": "C_initialized",
+        "description": "Initialize variable at declaration time.",
+        "formal_do": "do(C_initialized = 1)"
+      },
+      {
+        "variable": "C_init_check",
+        "description": "Add guard verifying initialization state before use.",
+        "formal_do": "do(C_init_check = 1)"
+      }
+    ]
+  },
+  "use_after_free": {
+    "cwes": ["CWE-416"],
+    "description": "Pointer reuse after being freed.",
+    "variables": [
+      {
+        "name": "C_free_exec",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Free operation executed"
+      },
+      {
+        "name": "C_pointer_cleared",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Pointer nullified or ownership transferred"
+      },
+      {
+        "name": "C_use_after_free",
+        "var_type": "bool",
+        "role": "endogenous",
+        "description": "Pointer dereferenced after free"
+      }
+    ],
+    "equations": [
+      {
+        "target": "C_use_after_free",
+        "expression": "C_free_exec && !C_pointer_cleared",
+        "description": "Use-after-free occurs when pointer freed but still used"
+      }
+    ],
+    "vulnerable_condition": "C_free_exec && !C_pointer_cleared",
+    "bindings": {
+      "C_free_exec": ["free", "delete", "g_free"],
+      "C_pointer_cleared": ["= NULL", "null", "reset", "flag"],
+      "C_use_after_free": ["*", "->", "use", "dereference"]
+    },
+    "interventions": [
+      {
+        "variable": "C_pointer_cleared",
+        "description": "Nullify pointer or gate subsequent use with flag.",
+        "formal_do": "do(C_pointer_cleared = 1)"
+      }
+    ]
+  }
+}
