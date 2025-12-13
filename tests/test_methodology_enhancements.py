@@ -116,3 +116,111 @@ def test_patch_effect_analyzer_detects_guard_resolution():
     assert effect.vulnerability_removed
     assert effect.diagnostics["remaining_missing_guards"] == {}
     assert effect.diagnostics["absence_resolution_rate"] == pytest.approx(1.0)
+
+
+def test_pcg_builder_emits_rich_metrics(monkeypatch):
+    # Allow heuristic analyzers to avoid hard dependency failures in CI
+    monkeypatch.setenv("PATCHSCRIBE_ALLOW_HEURISTICS", "1")
+    program = """
+    int foo(int x) {
+        int y = x + 1;
+        if (y > 0) {
+            return y;
+        }
+        return 0;
+    }
+    """.strip()
+    from patchscribe.pcg_builder import PCGBuilder
+    config = PCGBuilderConfig(
+        use_llvm_slicing=False,
+        apply_transitive_reduction=True,
+        strict_dependencies=False,
+        require_precise_static=False,
+    )
+    pcg, meta = PCGBuilder(program, {"location": 3, "cwe_id": "CWE-119"}, config).build()
+
+    summary = meta.get("pcg_summary") or {}
+    assert "edge_type_counts" in summary
+    assert "node_type_counts" in summary
+    assert "reduction_stats" in meta
+    assert isinstance(meta["analyzer_usage"], dict)
+    # Reduction stats should be well-formed
+    reduction = meta["reduction_stats"]
+    assert reduction["before"] >= reduction["after"] >= 0
+
+
+def test_intervention_planner_uses_canonical_interventions():
+    graph = ProgramCausalGraph()
+    graph.add_node(
+        PCGNode(
+            node_id="n1",
+            node_type="predicate",
+            description="if (idx < size)",
+            location=10,
+        )
+    )
+    graph.add_node(
+        PCGNode(
+            node_id="v1",
+            node_type="vulnerability",
+            description="buffer write",
+            location=12,
+        )
+    )
+    graph.add_edge(
+        PCGEdge(
+            source="n1",
+            target="v1",
+            edge_type="control_flow",
+            rationale="guard controls write",
+        )
+    )
+    scm = StructuralCausalModel(
+        vulnerable_condition="bounds_check_n1",
+        metadata={
+            "template_bindings": {"C_bounds_check": "n1"},
+            "canonical_interventions": [
+                {
+                    "variable": "C_bounds_check",
+                    "description": "Insert bounds guard",
+                    "formal_do": "do(C_bounds_check = 1)",
+                }
+            ],
+        },
+    )
+    planner = InterventionPlanner(graph, scm)
+    spec = planner.compute()
+
+    assert spec.interventions, "Expected canonical interventions to be emitted"
+    canonical = spec.interventions[0]
+    assert canonical.target_line == 10
+    assert "bounds" in canonical.rationale.lower()
+    assert canonical.formal_do == "do(C_bounds_check = 1)"
+    assert "Template canonical interventions" in spec.summary
+
+
+def test_verifier_fails_on_poc_failure(tmp_path):
+    # Minimal stubs for bug/patch specs
+    class DummyBug:
+        causal_paths: List = []
+        smt_artifact: str = ""
+
+    class DummyPatch:
+        smt_artifact: str = ""
+
+        class CodeDiff:
+            added_lines = [{"code": "if (x) return 0;"}]
+
+        code_diff = CodeDiff()
+
+    verifier = Verifier()
+    result = verifier.verify(
+        original_code="int main(){return 0;}",
+        patched_code="int main(){if(0)return 0; return 0;}",
+        E_bug=DummyBug(),
+        E_patch=DummyPatch(),
+        ground_truth=None,
+        poc_command=["bash", "-lc", "exit 1"],
+    )
+    assert result.passed_all_checks is False
+    assert result.overall_score < verifier.min_confidence

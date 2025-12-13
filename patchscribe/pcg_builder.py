@@ -66,33 +66,49 @@ class PCGBuilder:
         self.absence_labels = self._normalize_absence_labels()
 
     def build(self) -> Tuple[ProgramCausalGraph, Dict[str, object]]:
+        analyzer_usage: Dict[str, object] = {}
+        fallback_modes: List[str] = []
+
         # Step 1: LLVM backward slicing (if enabled and available)
         slice_result = None
         if self.config.use_llvm_slicing and LLVM_SLICER_AVAILABLE:
             slicer = create_backward_slicer(self.program)
             slice_result = slicer.slice(self.vuln_info["location"])
+            analyzer_usage["llvm_slice"] = bool(slice_result)
+        else:
+            analyzer_usage["llvm_slice"] = False
 
         # Use enhanced analyzers if available, otherwise fallback to regex-based
         if LLVM_STATIC_AVAILABLE:
             static_analyzer = create_static_analyzer(self.program, self.vuln_info["location"])
             static = static_analyzer.run()
+            analyzer_usage["static"] = "llvm"
         else:
             static = StaticAnalyzer(self.program, self.vuln_info["location"]).run()
+            analyzer_usage["static"] = "regex"
+            fallback_modes.append("static_regex")
 
         if PYCPARSER_AVAILABLE:
             ast_analyzer = create_ast_analyzer(self.program, self.vuln_info["location"])
             ast_result = ast_analyzer.run()
+            analyzer_usage["ast"] = "pycparser"
         else:
             ast_result = ASTAnalyzer(self.program, self.vuln_info["location"]).run()
+            analyzer_usage["ast"] = "regex"
+            fallback_modes.append("ast_regex")
 
         clang_result = ClangStaticAnalyzer(self.program).run(self.vuln_info["location"])
+        analyzer_usage["clang"] = bool(clang_result)
         dynamic = TaintAnalyzer(
             self.program,
             self.vuln_info["location"],
             self.config.taint_sources,
         ).run()
+        analyzer_usage["dynamic"] = "taint_sim"
         symbolic = SymbolicExplorer(self.program, self.vuln_info["location"]).run()
+        analyzer_usage["symbolic"] = "heuristic"
         angr_result = AngrExplorer(self.program).run()
+        analyzer_usage["angr"] = bool(angr_result)
         absence_result: AbsenceAnalysisResult | None = None
         if self.config.enable_absence_detection:
             absence_result = AbsenceAnalyzer(
@@ -100,6 +116,7 @@ class PCGBuilder:
                 self.vuln_info["location"],
                 expected_patterns=self.absence_labels,
             ).run()
+            analyzer_usage["absence"] = True
         graphs = [static.graph, ast_result.graph, dynamic.graph, symbolic.graph]
 
         # Add LLVM slice graph if available
@@ -123,9 +140,13 @@ class PCGBuilder:
             combined = self._filter_causal_relations(combined)
 
         # Step 3: Apply transitive reduction
+        pre_reduction_edges = len(combined.edges)
         if self.config.apply_transitive_reduction:
             combined = self._apply_transitive_reduction(combined)
+        post_reduction_edges = len(combined.edges)
 
+        edge_metrics = self._summarize_edges(combined)
+        node_metrics = self._summarize_nodes(combined)
         metadata = {
             "static_trace": static.trace,
             "ast_trace": ast_result.trace,
@@ -147,8 +168,17 @@ class PCGBuilder:
                 "missing_guard_count": sum(
                     1 for node in combined.nodes.values() if node.node_type == "missing_guard"
                 ),
+                "edge_type_counts": edge_metrics,
+                "node_type_counts": node_metrics,
             },
             "absence_metrics": absence_result.metrics if absence_result else None,
+            "analyzer_usage": analyzer_usage,
+            "fallback_modes": fallback_modes,
+            "reduction_stats": {
+                "before": pre_reduction_edges,
+                "after": post_reduction_edges,
+                "removed": max(0, pre_reduction_edges - post_reduction_edges),
+            },
         }
         return combined, metadata
 
@@ -515,6 +545,20 @@ class PCGBuilder:
             if node.location == line:
                 return node.node_id
         return None
+
+    @staticmethod
+    def _summarize_edges(graph: ProgramCausalGraph) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for edge in graph.edges:
+            counts[edge.edge_type] = counts.get(edge.edge_type, 0) + 1
+        return counts
+
+    @staticmethod
+    def _summarize_nodes(graph: ProgramCausalGraph) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for node in graph.nodes.values():
+            counts[node.node_type] = counts.get(node.node_type, 0) + 1
+        return counts
 
     def _enrich_node_metadata(self, graph: ProgramCausalGraph) -> None:
         """Populate identifier/datatype/value_range metadata for SCM + SMT layers."""

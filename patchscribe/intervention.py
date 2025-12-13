@@ -86,40 +86,50 @@ class InterventionPlanner:
         if not vuln_node:
             return InterventionSpec(summary="No vulnerability node present")
         condition = self.model.vulnerable_condition or "True"
-        blockers = self._minimal_blockers(condition)
-        if not blockers:
-            return InterventionSpec(summary="No causal blockers identified")
         interventions: List[Intervention] = []
-        for blocker in blockers:
-            for variable in sorted(blocker):
-                node_id = self._node_from_variable(variable)
-                if node_id not in self.graph.nodes:
-                    continue
-                parent = self.graph.nodes[node_id]
+        summary_parts: List[str] = []
 
-                # Generate semantic action guidance
-                semantic_action = self._generate_action_guidance(parent, variable)
+        # 1) Canonical interventions from SCM templates (if present)
+        canonical = self._canonical_interventions(vuln_node)
+        if canonical:
+            interventions.extend(canonical)
+            summary_parts.append("Template canonical interventions")
 
-                # Generate causal explanation
-                causal_role = self._explain_causal_role(parent, vuln_node)
+        # 2) Minimal blockers derived from SCM condition (solver + heuristics)
+        blockers = self._minimal_blockers(condition)
+        if blockers:
+            for blocker in blockers:
+                for variable in sorted(blocker):
+                    node_id = self._node_from_variable(variable)
+                    if node_id not in self.graph.nodes:
+                        continue
+                    parent = self.graph.nodes[node_id]
 
-                enforce = f"ENFORCE NOT {variable}"
-                rationale = f"Prevent {parent.description} from triggering vulnerability"
-                formal_do = self._build_formal_do(variable, enforce)
+                    # Generate semantic action guidance
+                    semantic_action = self._generate_action_guidance(parent, variable)
 
-                interventions.append(
-                    Intervention(
-                        target_line=parent.location or -1,
-                        enforce=enforce,
-                        rationale=rationale,
-                        semantic_action=semantic_action,
-                        causal_role=causal_role,
-                        variable_name=variable,
-                        formal_do=formal_do,
+                    # Generate causal explanation
+                    causal_role = self._explain_causal_role(parent, vuln_node)
+
+                    enforce = f"ENFORCE NOT {variable}"
+                    rationale = f"Prevent {parent.description} from triggering vulnerability"
+                    formal_do = self._build_formal_do(variable, enforce)
+
+                    interventions.append(
+                        Intervention(
+                            target_line=parent.location or -1,
+                            enforce=enforce,
+                            rationale=rationale,
+                            semantic_action=semantic_action,
+                            causal_role=causal_role,
+                            variable_name=variable,
+                            formal_do=formal_do,
+                        )
                     )
-                )
+            summary_parts.append("SMT-derived minimal interventions")
+
         interventions = _deduplicate_interventions(interventions)
-        summary = "SMT-derived minimal interventions to break causal chain"
+        summary = ", ".join(summary_parts) if summary_parts else "No causal blockers identified"
         return InterventionSpec(interventions=interventions, summary=summary)
 
     def _find_vulnerability_node(self):
@@ -244,6 +254,38 @@ class InterventionPlanner:
                 if var not in ['if', 'for', 'while', 'return', 'NULL', 'null']:
                     return var
         return ""
+
+    def _canonical_interventions(self, vuln_node: PCGNode | None) -> List[Intervention]:
+        """Instantiate canonical interventions defined in SCM templates."""
+        canonical: List[Intervention] = []
+        metadata = getattr(self.model, "metadata", {}) or {}
+        items = metadata.get("canonical_interventions") or []
+        for entry in items:
+            if not isinstance(entry, dict):
+                continue
+            variable = entry.get("variable") or entry.get("target")
+            if not variable:
+                continue
+            node_id = self._node_from_variable(variable)
+            node = self.graph.nodes.get(node_id) if node_id else None
+            target_line = node.location if node else -1
+            description = entry.get("description") or ""
+            enforce = f"ENFORCE NOT {variable}"
+            formal_do = entry.get("formal_do") or self._build_formal_do(variable, enforce)
+            semantic_action = description or (self._generate_action_guidance(node, variable) if node else "")
+            causal_role = self._explain_causal_role(node, vuln_node) if node else "Template intervention"
+            canonical.append(
+                Intervention(
+                    target_line=target_line,
+                    enforce=enforce,
+                    rationale=description or f"Apply canonical intervention for {variable}",
+                    semantic_action=semantic_action,
+                    causal_role=causal_role,
+                    variable_name=variable,
+                    formal_do=formal_do,
+                )
+            )
+        return canonical
 
     @staticmethod
     def _build_formal_do(variable: str, enforce: str) -> str:

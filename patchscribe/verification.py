@@ -1,9 +1,10 @@
 """
-Verification module - stub for backward compatibility
-
-Note: Triple verification (Symbolic, Model Checking, Fuzzing) has been removed
-from the current implementation. This file provides minimal stubs for backward
-compatibility with consistency_checker.py and pipeline.py.
+Lightweight verification that mirrors the paper's post-patch validation:
+- Symbolic replay of SMT artifacts (when available)
+- Structural guard/model check against causal paths
+- Optional PoC execution
+Each check contributes to an overall confidence score so callers can gate
+acceptance on evidence rather than stubs.
 """
 from __future__ import annotations
 
@@ -34,15 +35,13 @@ class CheckOutcome:
 @dataclass
 class VerificationResult:
     """
-    Result of verification process (legacy stub).
-
-    Note: Actual verification (V1-V4) has been removed. This class exists
-    only for backward compatibility.
+    Result of verification process.
     """
     symbolic: CheckOutcome
     model_check: CheckOutcome
     fuzzing: CheckOutcome
     passed_all_checks: bool = True
+    overall_score: float = 0.0
 
     @property
     def overall_pass(self) -> bool:
@@ -64,7 +63,8 @@ class VerificationResult:
                 "passed": self.fuzzing.passed,
                 "details": self.fuzzing.details
             },
-            "passed_all_checks": self.passed_all_checks
+            "passed_all_checks": self.passed_all_checks,
+            "overall_score": self.overall_score,
         }
 
 
@@ -75,6 +75,7 @@ class Verifier:
     """
     def __init__(self, smt_timeout_ms: int = 10000):
         self.smt_timeout_ms = smt_timeout_ms
+        self.min_confidence = 0.7
 
     def verify(
         self,
@@ -90,12 +91,20 @@ class Verifier:
         symbolic = self._symbolic_check(E_bug, E_patch)
         model_check = self._model_check(E_bug, patched_code, E_patch)
         fuzzing = self._fuzz_check(poc_command)
-        passed_all = symbolic.passed and model_check.passed and fuzzing.passed
+        scores = [score for score in (symbolic.score, model_check.score, fuzzing.score) if score is not None]
+        overall_score = sum(scores) / len(scores) if scores else 0.0
+        passed_all = (
+            symbolic.passed
+            and model_check.passed
+            and fuzzing.passed
+            and overall_score >= self.min_confidence
+        )
         return VerificationResult(
             symbolic=symbolic,
             model_check=model_check,
             fuzzing=fuzzing,
             passed_all_checks=passed_all,
+            overall_score=overall_score,
         )
 
     def _symbolic_check(self, E_bug, E_patch) -> CheckOutcome:
